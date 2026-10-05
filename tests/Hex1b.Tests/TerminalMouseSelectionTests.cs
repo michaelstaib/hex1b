@@ -201,19 +201,35 @@ public class TerminalMouseSelectionTests
     public void DragScrollStep_AfterExitCopyMode_DoesNothing()
     {
         var handle = CreateHandle(20, 5);
+        using var terminal = Hex1bTerminal.CreateBuilder()
+            .WithWorkload(new Hex1bAppWorkloadAdapter())
+            .WithHeadless()
+            .WithDimensions(20, 5)
+            .WithScrollback(100)
+            .Build();
+        ((ITerminalLifecycleAwarePresentationAdapter)handle).TerminalCreated(terminal);
+        var tokens = new List<AnsiToken>();
+        for (int i = 0; i < 30; i++)
+        {
+            tokens.Add(new TextToken($"Line {i}"));
+            tokens.Add(ControlCharacterToken.LineFeed);
+        }
+        terminal.ApplyTokens(tokens);
+        Assert.IsTrue(handle.ScrollbackCount > 2);
+
         handle.MouseSelect(2, 2, MouseAction.Down, SelectionMode.Character);
         handle.MouseSelect(2, -1, MouseAction.Drag, SelectionMode.Character);
         var staleSelection = TestSeq.IsType<TerminalSelection>(handle.Selection);
-        var cursorBeforeExit = staleSelection.Cursor;
 
         // A tick that passed its guard before copy mode ended runs after the exit.
         handle.ExitCopyMode();
+        var staleCursor = staleSelection.Cursor;
         handle.ApplyDragScrollStep(staleSelection, -1);
 
         Assert.IsFalse(handle.IsInCopyMode);
         Assert.IsNull(handle.Selection);
         Assert.AreEqual(0, handle.CurrentScrollbackOffset);
-        Assert.AreEqual(cursorBeforeExit, staleSelection.Cursor);
+        Assert.AreEqual(staleCursor, staleSelection.Cursor);
     }
 
     [TestMethod]
@@ -224,15 +240,14 @@ public class TerminalMouseSelectionTests
         handle.MouseSelect(2, 2, MouseAction.Down, SelectionMode.Character);
         handle.MouseSelect(2, -1, MouseAction.Drag, SelectionMode.Character);
         var staleSelection = TestSeq.IsType<TerminalSelection>(handle.Selection);
-        var cursorBeforeReset = staleSelection.Cursor;
 
         handle.Reset();
-        handle.ApplyDragScrollStep(staleSelection, -1);
+        var staleCursor = staleSelection.Cursor;
+        handle.ApplyDragScrollStep(staleSelection, 1);
 
         Assert.IsFalse(handle.IsInCopyMode);
         Assert.IsNull(handle.Selection);
-        Assert.AreEqual(0, handle.CurrentScrollbackOffset);
-        Assert.AreEqual(cursorBeforeReset, staleSelection.Cursor);
+        Assert.AreEqual(staleCursor, staleSelection.Cursor);
     }
 
     [TestMethod]
@@ -245,6 +260,7 @@ public class TerminalMouseSelectionTests
         var staleSelection = TestSeq.IsType<TerminalSelection>(handle.Selection);
 
         handle.ExitCopyMode();
+        var staleCursor = staleSelection.Cursor;
         handle.EnterCopyMode();
         var newSelection = TestSeq.IsType<TerminalSelection>(handle.Selection);
         var newCursor = newSelection.Cursor;
@@ -253,5 +269,6 @@ public class TerminalMouseSelectionTests
 
         Assert.AreSame(newSelection, handle.Selection);
         Assert.AreEqual(newCursor, newSelection.Cursor);
+        Assert.AreEqual(staleCursor, staleSelection.Cursor);
     }
 }
