@@ -425,8 +425,17 @@ public static class AnsiTokenizer
                 break;
 
             case 'u':
-                // ANSI restore cursor
-                tokens.Add(RestoreCursorToken.Ansi);
+                // CSI u with no prefix is ANSI restore cursor. The prefixed forms belong to the
+                // kitty keyboard protocol (CSI ? u query, CSI > flags u push, CSI = flags;mode u
+                // set) and must pass through verbatim instead of moving the cursor.
+                if (isPrivateMode || (parameters.Length > 0 && parameters[0] is '>' or '=' or '<'))
+                {
+                    tokens.Add(new UnrecognizedSequenceToken(text[start..(end + 1)]));
+                }
+                else
+                {
+                    tokens.Add(RestoreCursorToken.Ansi);
+                }
                 break;
 
             case 'A':
@@ -698,42 +707,34 @@ public static class AnsiTokenizer
         // SGR mouse format: ESC [ < Cb ; Cx ; Cy M (press) or ESC [ < Cb ; Cx ; Cy m (release)
         // start points to ESC, start+2 points to '<'
         int pos = start + 3; // Skip ESC [ <
-        
-        // Parse button code
-        int buttonEnd = pos;
-        while (buttonEnd < text.Length && text[buttonEnd] != ';')
-            buttonEnd++;
-        
-        if (buttonEnd >= text.Length || !int.TryParse(text[pos..buttonEnd], out var buttonCode))
+
+        // Bound the scan at the CSI final byte (0x40-0x7E) so that a CSI < sequence that is
+        // not a mouse report (for example the kitty keyboard protocol pop CSI < u) can never
+        // read past its own end.
+        int finalIndex = pos;
+        while (finalIndex < text.Length && (text[finalIndex] < '\x40' || text[finalIndex] > '\x7e'))
+            finalIndex++;
+
+        if (finalIndex >= text.Length)
         {
-            tokens.Add(new UnrecognizedSequenceToken(text[start..(buttonEnd + 1)]));
-            return buttonEnd + 1;
+            // Incomplete sequence (for example a truncated mouse report)
+            tokens.Add(new UnrecognizedSequenceToken(text[start..]));
+            return text.Length;
         }
-        
-        // Parse X coordinate
-        int xStart = buttonEnd + 1;
-        int xEnd = xStart;
-        while (xEnd < text.Length && text[xEnd] != ';')
-            xEnd++;
-        
-        if (xEnd >= text.Length || !int.TryParse(text[xStart..xEnd], out var x))
+
+        int yEnd = finalIndex;
+        var parts = text[pos..finalIndex].Split(';');
+
+        if ((text[finalIndex] != 'M' && text[finalIndex] != 'm')
+            || parts.Length != 3
+            || !int.TryParse(parts[0], out var buttonCode)
+            || !int.TryParse(parts[1], out var x)
+            || !int.TryParse(parts[2], out var y))
         {
-            tokens.Add(new UnrecognizedSequenceToken(text[start..(xEnd + 1)]));
-            return xEnd + 1;
+            tokens.Add(new UnrecognizedSequenceToken(text[start..(finalIndex + 1)]));
+            return finalIndex + 1;
         }
-        
-        // Parse Y coordinate and terminator
-        int yStart = xEnd + 1;
-        int yEnd = yStart;
-        while (yEnd < text.Length && text[yEnd] != 'M' && text[yEnd] != 'm')
-            yEnd++;
-        
-        if (yEnd >= text.Length || !int.TryParse(text[yStart..yEnd], out var y))
-        {
-            tokens.Add(new UnrecognizedSequenceToken(text[start..(yEnd + 1)]));
-            return yEnd + 1;
-        }
-        
+
         char terminator = text[yEnd];
         
         // Decode button and modifiers from buttonCode

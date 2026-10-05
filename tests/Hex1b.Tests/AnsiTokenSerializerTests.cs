@@ -352,6 +352,18 @@ public class AnsiTokenSerializerTests
         Assert.AreEqual("\x1b[5Z", result);
     }
 
+    [TestMethod]
+    [DataRow("\x1b[<u")]
+    [DataRow("\x1b[>1u")]
+    [DataRow("\x1b[?u")]
+    [DataRow("\x1b[=1;1u")]
+    public void Serialize_KittyKeyboardSequences_RoundTripsVerbatim(string input)
+    {
+        var tokens = AnsiTokenizer.Tokenize(input);
+
+        Assert.AreEqual(input, AnsiTokenSerializer.Serialize(tokens));
+    }
+
     #endregion
 
     #region Multi-Token Tests
