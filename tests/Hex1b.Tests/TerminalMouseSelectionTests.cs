@@ -195,4 +195,63 @@ public class TerminalMouseSelectionTests
         Assert.IsTrue(pos.Column < handle.Width);
         Assert.IsTrue(pos.Row < handle.VirtualBufferHeight);
     }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void DragScrollStep_AfterExitCopyMode_DoesNothing()
+    {
+        var handle = CreateHandle(20, 5);
+        handle.MouseSelect(2, 2, MouseAction.Down, SelectionMode.Character);
+        handle.MouseSelect(2, -1, MouseAction.Drag, SelectionMode.Character);
+        var staleSelection = TestSeq.IsType<TerminalSelection>(handle.Selection);
+        var cursorBeforeExit = staleSelection.Cursor;
+
+        // A tick that passed its guard before copy mode ended runs after the exit.
+        handle.ExitCopyMode();
+        handle.ApplyDragScrollStep(staleSelection, -1);
+
+        Assert.IsFalse(handle.IsInCopyMode);
+        Assert.IsNull(handle.Selection);
+        Assert.AreEqual(0, handle.CurrentScrollbackOffset);
+        Assert.AreEqual(cursorBeforeExit, staleSelection.Cursor);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void DragScrollStep_AfterReset_DoesNothing()
+    {
+        var handle = CreateHandle(20, 5);
+        handle.MouseSelect(2, 2, MouseAction.Down, SelectionMode.Character);
+        handle.MouseSelect(2, -1, MouseAction.Drag, SelectionMode.Character);
+        var staleSelection = TestSeq.IsType<TerminalSelection>(handle.Selection);
+        var cursorBeforeReset = staleSelection.Cursor;
+
+        handle.Reset();
+        handle.ApplyDragScrollStep(staleSelection, -1);
+
+        Assert.IsFalse(handle.IsInCopyMode);
+        Assert.IsNull(handle.Selection);
+        Assert.AreEqual(0, handle.CurrentScrollbackOffset);
+        Assert.AreEqual(cursorBeforeReset, staleSelection.Cursor);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void DragScrollStep_AfterCopyModeReentered_DoesNotMoveNewSelection()
+    {
+        var handle = CreateHandle(20, 5);
+        handle.MouseSelect(2, 2, MouseAction.Down, SelectionMode.Character);
+        handle.MouseSelect(2, -1, MouseAction.Drag, SelectionMode.Character);
+        var staleSelection = TestSeq.IsType<TerminalSelection>(handle.Selection);
+
+        handle.ExitCopyMode();
+        handle.EnterCopyMode();
+        var newSelection = TestSeq.IsType<TerminalSelection>(handle.Selection);
+        var newCursor = newSelection.Cursor;
+
+        handle.ApplyDragScrollStep(staleSelection, 1);
+
+        Assert.AreSame(newSelection, handle.Selection);
+        Assert.AreEqual(newCursor, newSelection.Cursor);
+    }
 }
