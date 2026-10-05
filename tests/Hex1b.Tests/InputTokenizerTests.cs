@@ -347,6 +347,15 @@ public class InputTokenizerTests
         Assert.AreEqual(original, serialized);
     }
     
+    [TestMethod]
+    public void SgrMouse_Truncated_DoesNotThrow()
+    {
+        // An escape timeout can flush a partial mouse report.
+        var tokens = AnsiTokenizer.Tokenize("\x1b[<0;10");
+
+        TestSeq.IsType<UnrecognizedSequenceToken>(TestSeq.Single(tokens));
+    }
+
     // === Arrow Keys (CSI A/B/C/D) ===
     // These already work via CursorMoveToken but let's verify they still work
     

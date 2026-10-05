@@ -611,6 +611,72 @@ public class AnsiTokenizerTests
 
     #endregion
 
+    #region Kitty Keyboard Protocol Sequence Tests
+
+    [TestMethod]
+    public void Tokenize_KittyKeyboardPop_ReturnsSingleUnrecognizedToken()
+    {
+        var result = AnsiTokenizer.Tokenize("\x1b[<u");
+
+        var token = TestSeq.IsType<UnrecognizedSequenceToken>(TestSeq.Single(result));
+        Assert.AreEqual("\x1b[<u", token.Sequence);
+    }
+
+    [TestMethod]
+    public void Tokenize_KittyKeyboardPopFollowedByOtherSequences_ReturnsThreeTokens()
+    {
+        var result = AnsiTokenizer.Tokenize("\x1b[<u\x1b[?25h\x1b[1;1H");
+
+        Assert.HasCount(3, result);
+        var pop = TestSeq.IsType<UnrecognizedSequenceToken>(result[0]);
+        Assert.AreEqual("\x1b[<u", pop.Sequence);
+        var show = TestSeq.IsType<PrivateModeToken>(result[1]);
+        Assert.AreEqual(25, show.Mode);
+        Assert.IsTrue(show.Enable);
+        var move = TestSeq.IsType<CursorPositionToken>(result[2]);
+        Assert.AreEqual(1, move.Row);
+        Assert.AreEqual(1, move.Column);
+    }
+
+    [TestMethod]
+    [DataRow("\x1b[>1u")]
+    [DataRow("\x1b[?u")]
+    [DataRow("\x1b[=1;1u")]
+    [DataRow("\x1b[<1u")]
+    public void Tokenize_KittyKeyboardPrefixedU_ReturnsUnrecognizedWithExactBytes(string input)
+    {
+        var result = AnsiTokenizer.Tokenize(input);
+
+        var token = TestSeq.IsType<UnrecognizedSequenceToken>(TestSeq.Single(result));
+        Assert.AreEqual(input, token.Sequence);
+        Assert.AreEqual(input, AnsiTokenSerializer.Serialize(result));
+    }
+
+    [TestMethod]
+    [DataRow("\x1b[<0;10")]
+    [DataRow("\x1b[<0;10;5")]
+    [DataRow("\x1b[<")]
+    public void Tokenize_TruncatedSgrMouseReport_ReturnsUnrecognizedWithoutThrowing(string input)
+    {
+        var result = AnsiTokenizer.Tokenize(input);
+
+        var token = TestSeq.IsType<UnrecognizedSequenceToken>(TestSeq.Single(result));
+        Assert.AreEqual(input, token.Sequence);
+    }
+
+    [TestMethod]
+    public void Tokenize_SgrMouseReportWithWrongFinalByte_ReturnsUnrecognized()
+    {
+        var result = AnsiTokenizer.Tokenize("\x1b[<0;10;5uX");
+
+        Assert.HasCount(2, result);
+        var token = TestSeq.IsType<UnrecognizedSequenceToken>(result[0]);
+        Assert.AreEqual("\x1b[<0;10;5u", token.Sequence);
+        TestSeq.IsType<TextToken>(result[1]);
+    }
+
+    #endregion
+
     #region OSC Token Tests
 
     [TestMethod]
