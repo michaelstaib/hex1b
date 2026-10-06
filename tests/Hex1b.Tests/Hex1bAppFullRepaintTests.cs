@@ -54,6 +54,99 @@ public class Hex1bAppFullRepaintTests
         Assert.AreEqual('Y', grid[0, 1]);
     }
 
+    [TestMethod]
+    public async Task RequestFullRepaint_KgpImageOnScreen_KeepsPlacement()
+    {
+        await RunKgpScenarioAsync(
+            trigger: workload => workload.RequestFullRepaint());
+    }
+
+    [TestMethod]
+    public async Task Resize_FinalSizeEqualsCurrentSize_KgpImageOnScreen_KeepsPlacement()
+    {
+        await RunKgpScenarioAsync(
+            trigger: workload => Assert.IsTrue(workload.TryWriteInputEvent(new Hex1bResizeEvent(20, 6))));
+    }
+
+    /// <summary>
+    /// A full repaint without a resize clears the screen with ED 2. That removes the visible
+    /// KGP placements and frees their image data in the terminal, so the repaint frame has to
+    /// send the image and its placement again.
+    /// </summary>
+    private static async Task RunKgpScenarioAsync(Action<Hex1bAppWorkloadAdapter> trigger)
+    {
+        var imageBytes = KgpTestHelper.CreatePixelData(4, 4, fillByte: 0x5A);
+        var capabilities = new TerminalCapabilities
+        {
+            SupportsKgp = true,
+            SupportsTrueColor = true,
+            Supports256Colors = true,
+            CellPixelWidth = 10,
+            CellPixelHeight = 20,
+        };
+
+        using var workload = new Hex1bAppWorkloadAdapter(capabilities);
+        using var terminal = Hex1bTerminal.CreateBuilder()
+            .WithWorkload(workload)
+            .WithHeadless(capabilities)
+            .WithDimensions(20, 6)
+            .Build();
+
+        var repainted = false;
+        using var app = new Hex1bApp(
+            ctx => Task.FromResult<Hex1bWidget>(
+                ctx.VStack(v => [
+                    v.Text(repainted ? "after" : "before"),
+                    new KgpImageWidget(imageBytes, 4, 4, new TextBlockWidget("[fallback]"))
+                        .Width(4)
+                        .Height(2),
+                ])),
+            new Hex1bAppOptions { WorkloadAdapter = workload, EnableInputCoalescing = false });
+
+        var runTask = app.RunAsync(TestContext.Current.CancellationToken);
+
+        try
+        {
+            await new Hex1bTerminalInputSequenceBuilder()
+                .WaitUntil(
+                    s => s.ContainsText("before") && s.KgpPlacements.Count == 1,
+                    TimeSpan.FromSeconds(5),
+                    "first frame showed the image")
+                .Build()
+                .ApplyAsync(terminal, TestContext.Current.CancellationToken);
+
+            // "after" is only written by the repaint frame, after its ED 2, so once it is visible
+            // the clear has been applied and the placement must be back by the end of that frame.
+            repainted = true;
+            trigger(workload);
+
+            using var snapshot = await new Hex1bTerminalInputSequenceBuilder()
+                .WaitUntil(
+                    s => s.ContainsText("after"),
+                    TimeSpan.FromSeconds(5),
+                    "repaint frame was rendered")
+                .WaitUntil(
+                    s => s.KgpPlacements.Count == 1
+                        && s.KgpImages.TryGetValue(s.KgpPlacements[0].ImageId, out var image)
+                        && image.Data.AsSpan().SequenceEqual(imageBytes),
+                    TimeSpan.FromSeconds(5),
+                    "image and placement were sent again after the clear")
+                .Capture("kgp-after-repaint")
+                .Build()
+                .ApplyWithCaptureAsync(terminal, TestContext.Current.CancellationToken);
+
+            var placement = TestSeq.Single(snapshot.KgpPlacements);
+            CollectionAssert.AreEqual(imageBytes, snapshot.KgpImages[placement.ImageId].Data);
+            Assert.AreEqual(1, placement.Row);
+            Assert.AreEqual(0, placement.Column);
+        }
+        finally
+        {
+            app.RequestStop();
+            await runTask;
+        }
+    }
+
     private static async Task RunScenarioAsync(Func<Hex1bAppWorkloadAdapter, CancellationToken, Task> trigger)
     {
         var grid = await RunScenarioCoreAsync(movedGlyph: true, trigger);
