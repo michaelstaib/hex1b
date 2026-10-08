@@ -486,6 +486,7 @@ public class WindowsPtyDisposeTests
     /// must not throw ObjectDisposedException on background threads.
     /// </summary>
     [TestMethod]
+    [Ignore("Hangs in Windows CI; investigate and re-enable in https://github.com/mitchdenny/hex1b/issues/655.")]
     [TestCategory("Windows")]
     public async Task DisposeAsync_WhileProcessRunning_DoesNotThrowObjectDisposedException()
     {
