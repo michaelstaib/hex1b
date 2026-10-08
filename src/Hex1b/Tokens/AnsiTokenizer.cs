@@ -278,14 +278,8 @@ public static class AnsiTokenizer
 
     private static int ParseCsiSequence(string text, int start, List<AnsiToken> tokens)
     {
-        // Find the command character (first letter or ~ after ESC [)
+        // Find the CSI final byte after ESC [.
         int end = start + 2;
-        
-        // Check for SGR mouse sequence (ESC [ <) - must be checked before private mode
-        if (end < text.Length && text[end] == '<')
-        {
-            return ParseSgrMouseSequence(text, start, tokens);
-        }
         
         // Check for private mode indicator (?)
         bool isPrivateMode = end < text.Length && text[end] == '?';
@@ -296,6 +290,13 @@ public static class AnsiTokenizer
         // Parameter bytes are 0x30-0x3F and intermediate bytes are 0x20-0x2F.
         while (end < text.Length && (text[end] < '\x40' || text[end] > '\x7e'))
         {
+            // A new ESC interrupts this CSI; leave it for the outer tokenizer.
+            if (text[end] == '\x1b')
+            {
+                tokens.Add(new UnrecognizedSequenceToken(text[start..end]));
+                return end;
+            }
+
             end++;
         }
 
@@ -304,6 +305,11 @@ public static class AnsiTokenizer
             // Incomplete sequence
             tokens.Add(new UnrecognizedSequenceToken(text[start..]));
             return text.Length;
+        }
+
+        if (text[start + 2] == '<')
+        {
+            return ParseSgrMouseSequence(text, start, end, tokens);
         }
 
         var command = text[end];
@@ -425,8 +431,17 @@ public static class AnsiTokenizer
                 break;
 
             case 'u':
-                // ANSI restore cursor
-                tokens.Add(RestoreCursorToken.Ansi);
+                // CSI u with no prefix is ANSI restore cursor. The prefixed forms belong to the
+                // kitty keyboard protocol (CSI ? u query, CSI > flags u push, CSI = flags;mode u
+                // set) and must pass through verbatim instead of moving the cursor.
+                if (isPrivateMode || (parameters.Length > 0 && parameters[0] is '>' or '=' or '<'))
+                {
+                    tokens.Add(new UnrecognizedSequenceToken(text[start..(end + 1)]));
+                }
+                else
+                {
+                    tokens.Add(RestoreCursorToken.Ansi);
+                }
                 break;
 
             case 'A':
@@ -693,48 +708,25 @@ public static class AnsiTokenizer
             : defaultValue;
     }
     
-    private static int ParseSgrMouseSequence(string text, int start, List<AnsiToken> tokens)
+    private static int ParseSgrMouseSequence(string text, int start, int finalIndex, List<AnsiToken> tokens)
     {
         // SGR mouse format: ESC [ < Cb ; Cx ; Cy M (press) or ESC [ < Cb ; Cx ; Cy m (release)
         // start points to ESC, start+2 points to '<'
         int pos = start + 3; // Skip ESC [ <
-        
-        // Parse button code
-        int buttonEnd = pos;
-        while (buttonEnd < text.Length && text[buttonEnd] != ';')
-            buttonEnd++;
-        
-        if (buttonEnd >= text.Length || !int.TryParse(text[pos..buttonEnd], out var buttonCode))
+
+        var parts = text[pos..finalIndex].Split(';');
+
+        if ((text[finalIndex] != 'M' && text[finalIndex] != 'm')
+            || parts.Length != 3
+            || !int.TryParse(parts[0], out var buttonCode)
+            || !int.TryParse(parts[1], out var x)
+            || !int.TryParse(parts[2], out var y))
         {
-            tokens.Add(new UnrecognizedSequenceToken(text[start..(buttonEnd + 1)]));
-            return buttonEnd + 1;
+            tokens.Add(new UnrecognizedSequenceToken(text[start..(finalIndex + 1)]));
+            return finalIndex + 1;
         }
-        
-        // Parse X coordinate
-        int xStart = buttonEnd + 1;
-        int xEnd = xStart;
-        while (xEnd < text.Length && text[xEnd] != ';')
-            xEnd++;
-        
-        if (xEnd >= text.Length || !int.TryParse(text[xStart..xEnd], out var x))
-        {
-            tokens.Add(new UnrecognizedSequenceToken(text[start..(xEnd + 1)]));
-            return xEnd + 1;
-        }
-        
-        // Parse Y coordinate and terminator
-        int yStart = xEnd + 1;
-        int yEnd = yStart;
-        while (yEnd < text.Length && text[yEnd] != 'M' && text[yEnd] != 'm')
-            yEnd++;
-        
-        if (yEnd >= text.Length || !int.TryParse(text[yStart..yEnd], out var y))
-        {
-            tokens.Add(new UnrecognizedSequenceToken(text[start..(yEnd + 1)]));
-            return yEnd + 1;
-        }
-        
-        char terminator = text[yEnd];
+
+        char terminator = text[finalIndex];
         
         // Decode button and modifiers from buttonCode
         var modifiers = Input.Hex1bModifiers.None;
@@ -764,7 +756,7 @@ public static class AnsiTokenizer
         // Convert to 0-based coordinates
         tokens.Add(new SgrMouseToken(button, action, x - 1, y - 1, modifiers, buttonCode));
         
-        return yEnd + 1;
+        return finalIndex + 1;
     }
     
     /// <summary>
