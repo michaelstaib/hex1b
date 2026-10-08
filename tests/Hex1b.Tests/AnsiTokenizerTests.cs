@@ -665,6 +665,58 @@ public class AnsiTokenizerTests
     }
 
     [TestMethod]
+    [DataRow("\x1b[<")]
+    [DataRow("\x1b[<0;10")]
+    [DataRow("\x1b[<0;10;5")]
+    [DataRow("\x1b[")]
+    [DataRow("\x1b[?")]
+    [DataRow("\x1b[1;")]
+    public void Tokenize_IncompleteCsiFollowedByEscape_PreservesFollowingCommand(string incomplete)
+    {
+        var input = incomplete + "\x1b[2;3H";
+        var result = AnsiTokenizer.Tokenize(input);
+
+        Assert.HasCount(2, result);
+        var interrupted = TestSeq.IsType<UnrecognizedSequenceToken>(result[0]);
+        Assert.AreEqual(incomplete, interrupted.Sequence);
+        var move = TestSeq.IsType<CursorPositionToken>(result[1]);
+        Assert.AreEqual(2, move.Row);
+        Assert.AreEqual(3, move.Column);
+        Assert.AreEqual(input, AnsiTokenSerializer.Serialize(result));
+    }
+
+    [TestMethod]
+    [DataRow("\x1b[<0;10")]
+    [DataRow("\x1b[?")]
+    public void Tokenize_IncompleteCsiFollowedByDecEscape_PreservesFollowingCommand(string incomplete)
+    {
+        var input = incomplete + "\x1b" + "8";
+        var result = AnsiTokenizer.Tokenize(input);
+
+        Assert.HasCount(2, result);
+        var interrupted = TestSeq.IsType<UnrecognizedSequenceToken>(result[0]);
+        Assert.AreEqual(incomplete, interrupted.Sequence);
+        Assert.AreSame(RestoreCursorToken.Dec, result[1]);
+        Assert.AreEqual(input, AnsiTokenSerializer.Serialize(result));
+    }
+
+    [TestMethod]
+    [DataRow("\x1b[<0;10")]
+    [DataRow("\x1b[?")]
+    public void Tokenize_IncompleteCsiFollowedByBareEscape_PreservesTrailingEscape(string incomplete)
+    {
+        var input = incomplete + "\x1b";
+        var result = AnsiTokenizer.Tokenize(input);
+
+        Assert.HasCount(2, result);
+        var interrupted = TestSeq.IsType<UnrecognizedSequenceToken>(result[0]);
+        Assert.AreEqual(incomplete, interrupted.Sequence);
+        var escape = TestSeq.IsType<UnrecognizedSequenceToken>(result[1]);
+        Assert.AreEqual("\x1b", escape.Sequence);
+        Assert.AreEqual(input, AnsiTokenSerializer.Serialize(result));
+    }
+
+    [TestMethod]
     public void Tokenize_SgrMouseReportWithWrongFinalByte_ReturnsUnrecognized()
     {
         var result = AnsiTokenizer.Tokenize("\x1b[<0;10;5uX");

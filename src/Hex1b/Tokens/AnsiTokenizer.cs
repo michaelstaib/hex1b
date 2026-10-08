@@ -278,14 +278,8 @@ public static class AnsiTokenizer
 
     private static int ParseCsiSequence(string text, int start, List<AnsiToken> tokens)
     {
-        // Find the command character (first letter or ~ after ESC [)
+        // Find the CSI final byte after ESC [.
         int end = start + 2;
-        
-        // Check for SGR mouse sequence (ESC [ <) - must be checked before private mode
-        if (end < text.Length && text[end] == '<')
-        {
-            return ParseSgrMouseSequence(text, start, tokens);
-        }
         
         // Check for private mode indicator (?)
         bool isPrivateMode = end < text.Length && text[end] == '?';
@@ -296,6 +290,13 @@ public static class AnsiTokenizer
         // Parameter bytes are 0x30-0x3F and intermediate bytes are 0x20-0x2F.
         while (end < text.Length && (text[end] < '\x40' || text[end] > '\x7e'))
         {
+            // A new ESC interrupts this CSI; leave it for the outer tokenizer.
+            if (text[end] == '\x1b')
+            {
+                tokens.Add(new UnrecognizedSequenceToken(text[start..end]));
+                return end;
+            }
+
             end++;
         }
 
@@ -304,6 +305,11 @@ public static class AnsiTokenizer
             // Incomplete sequence
             tokens.Add(new UnrecognizedSequenceToken(text[start..]));
             return text.Length;
+        }
+
+        if (text[start + 2] == '<')
+        {
+            return ParseSgrMouseSequence(text, start, end, tokens);
         }
 
         var command = text[end];
@@ -702,27 +708,12 @@ public static class AnsiTokenizer
             : defaultValue;
     }
     
-    private static int ParseSgrMouseSequence(string text, int start, List<AnsiToken> tokens)
+    private static int ParseSgrMouseSequence(string text, int start, int finalIndex, List<AnsiToken> tokens)
     {
         // SGR mouse format: ESC [ < Cb ; Cx ; Cy M (press) or ESC [ < Cb ; Cx ; Cy m (release)
         // start points to ESC, start+2 points to '<'
         int pos = start + 3; // Skip ESC [ <
 
-        // Bound the scan at the CSI final byte (0x40-0x7E) so that a CSI < sequence that is
-        // not a mouse report (for example the kitty keyboard protocol pop CSI < u) can never
-        // read past its own end.
-        int finalIndex = pos;
-        while (finalIndex < text.Length && (text[finalIndex] < '\x40' || text[finalIndex] > '\x7e'))
-            finalIndex++;
-
-        if (finalIndex >= text.Length)
-        {
-            // Incomplete sequence (for example a truncated mouse report)
-            tokens.Add(new UnrecognizedSequenceToken(text[start..]));
-            return text.Length;
-        }
-
-        int yEnd = finalIndex;
         var parts = text[pos..finalIndex].Split(';');
 
         if ((text[finalIndex] != 'M' && text[finalIndex] != 'm')
@@ -735,7 +726,7 @@ public static class AnsiTokenizer
             return finalIndex + 1;
         }
 
-        char terminator = text[yEnd];
+        char terminator = text[finalIndex];
         
         // Decode button and modifiers from buttonCode
         var modifiers = Input.Hex1bModifiers.None;
@@ -765,7 +756,7 @@ public static class AnsiTokenizer
         // Convert to 0-based coordinates
         tokens.Add(new SgrMouseToken(button, action, x - 1, y - 1, modifiers, buttonCode));
         
-        return yEnd + 1;
+        return finalIndex + 1;
     }
     
     /// <summary>
