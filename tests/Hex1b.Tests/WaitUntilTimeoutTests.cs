@@ -1,6 +1,7 @@
 using Hex1b.Automation;
 using Hex1b.Input;
 using Hex1b.Widgets;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Hex1b.Tests;
 
@@ -247,7 +248,7 @@ public class WaitUntilTimeoutTests
             .WithDimensions(40, 10)
             .Build();
 
-        var time = new SkewedTimeProvider();
+        var time = new FakeTimeProvider();
         var options = new Hex1bTerminalInputSequenceOptions { TimeProvider = time };
         var timeout = TimeSpan.FromSeconds(1);
 
@@ -257,13 +258,12 @@ public class WaitUntilTimeoutTests
             .Build();
         var apply = sequence.ApplyAsync(terminal, TestContext.Current.CancellationToken);
 
-        await Task.Delay(100, TestContext.Current.CancellationToken);
-        time.StampSkew = 2 * TimeProvider.System.TimestampFrequency;
+        time.Advance(TimeSpan.FromSeconds(2));
 
         var ex = await Assert.ThrowsExactlyAsync<WaitUntilTimeoutException>(async () => await apply);
 
         // The wait ran past its budget, so the message reports what really passed next to the budget.
-        Assert.Contains("timed out after 00:00:02.", ex.Message);
+        Assert.Contains("timed out after 00:00:02 (", ex.Message);
         Assert.Contains($"timeout {timeout}", ex.Message);
         Assert.AreEqual(timeout, ex.Timeout);
     }
