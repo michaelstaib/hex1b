@@ -1,6 +1,7 @@
 using Hex1b.Automation;
 using Hex1b.Input;
 using Hex1b.Widgets;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Hex1b.Tests;
 
@@ -208,5 +209,72 @@ public class WaitUntilTimeoutTests
 
         Assert.Contains(timeout.ToString(), ex.Message);
         Assert.AreEqual(timeout, ex.Timeout);
+    }
+
+    [TestMethod]
+    public async Task WaitUntil_WallClockJumpsForward_KeepsWaiting()
+    {
+        await using var terminal = Hex1bTerminal.CreateBuilder()
+            .WithHex1bApp(ctx => new TextBlockWidget("Hello"))
+            .WithHeadless()
+            .WithDimensions(40, 10)
+            .Build();
+
+        var time = new SkewedTimeProvider();
+        var options = new Hex1bTerminalInputSequenceOptions { TimeProvider = time };
+        var automator = new Hex1bTerminalAutomator(terminal, options, TimeSpan.FromSeconds(30));
+
+        var wait = automator.WaitUntilAsync(_ => false, TimeSpan.FromSeconds(30), "never");
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+
+        // A wall-clock step (NTP correction, resume from sleep) must not end the wait.
+        time.WallSkew = TimeSpan.FromSeconds(29);
+        await Task.Delay(750, TestContext.Current.CancellationToken);
+
+        Assert.IsFalse(wait.IsCompleted, "A forward wall-clock jump ended the wait early.");
+
+        // Advance the monotonic clock past the budget so the wait finishes.
+        time.StampSkew = 31 * TimeProvider.System.TimestampFrequency;
+        await Assert.ThrowsExactlyAsync<Hex1bAutomationException>(async () =>
+            await wait.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task WaitUntil_Timeout_MessageContainsElapsedTime()
+    {
+        await using var terminal = Hex1bTerminal.CreateBuilder()
+            .WithHex1bApp(ctx => new TextBlockWidget("Hello"))
+            .WithHeadless()
+            .WithDimensions(40, 10)
+            .Build();
+
+        var time = new FakeTimeProvider();
+        var options = new Hex1bTerminalInputSequenceOptions { TimeProvider = time };
+        var timeout = TimeSpan.FromSeconds(1);
+
+        var sequence = new Hex1bTerminalInputSequenceBuilder()
+            .WithOptions(options)
+            .WaitUntil(_ => false, timeout, "never")
+            .Build();
+        var apply = sequence.ApplyAsync(terminal, TestContext.Current.CancellationToken);
+
+        time.Advance(TimeSpan.FromSeconds(2));
+
+        var ex = await Assert.ThrowsExactlyAsync<WaitUntilTimeoutException>(async () => await apply);
+
+        // The wait ran past its budget, so the message reports what really passed next to the budget.
+        Assert.Contains("timed out after 00:00:02 (", ex.Message);
+        Assert.Contains($"timeout {timeout}", ex.Message);
+        Assert.AreEqual(timeout, ex.Timeout);
+    }
+
+    private sealed class SkewedTimeProvider : TimeProvider
+    {
+        public TimeSpan WallSkew;
+        public long StampSkew;
+
+        public override DateTimeOffset GetUtcNow() => System.GetUtcNow() + WallSkew;
+
+        public override long GetTimestamp() => System.GetTimestamp() + StampSkew;
     }
 }

@@ -18,9 +18,12 @@ public sealed record WaitUntilStep(
     {
         var timeProvider = options.TimeProvider ?? TimeProvider.System;
         var effectiveTimeout = Timeout;
-        var deadline = timeProvider.GetUtcNow() + effectiveTimeout;
 
-        while (timeProvider.GetUtcNow() < deadline)
+        // Measure against the monotonic clock so a wall-clock step (NTP correction, sleep and
+        // resume) neither ends the wait early nor extends it.
+        var start = timeProvider.GetTimestamp();
+
+        while (timeProvider.GetElapsedTime(start) < effectiveTimeout)
         {
             ct.ThrowIfCancellationRequested();
 
@@ -38,6 +41,7 @@ public sealed record WaitUntilStep(
         var description = Description ?? PredicateExpression ?? "condition";
         throw new WaitUntilTimeoutException(
             effectiveTimeout,
+            timeProvider.GetElapsedTime(start),
             description,
             finalSnapshot,
             CallerFilePath,

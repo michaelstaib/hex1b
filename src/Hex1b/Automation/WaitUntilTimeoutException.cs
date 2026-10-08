@@ -34,11 +34,12 @@ public sealed class WaitUntilTimeoutException : TimeoutException
 
     internal WaitUntilTimeoutException(
         TimeSpan timeout,
+        TimeSpan elapsed,
         string conditionDescription,
         Hex1bTerminalSnapshot? snapshot,
         string? callerFilePath,
         int? callerLineNumber)
-        : base(FormatMessage(timeout, conditionDescription, snapshot, callerFilePath, callerLineNumber))
+        : base(FormatMessage(timeout, elapsed, conditionDescription, snapshot, callerFilePath, callerLineNumber))
     {
         Timeout = timeout;
         ConditionDescription = conditionDescription;
@@ -49,13 +50,14 @@ public sealed class WaitUntilTimeoutException : TimeoutException
 
     private static string FormatMessage(
         TimeSpan timeout,
+        TimeSpan elapsed,
         string conditionDescription,
         Hex1bTerminalSnapshot? snapshot,
         string? callerFilePath,
         int? callerLineNumber)
     {
         var builder = new System.Text.StringBuilder();
-        builder.Append($"WaitUntil timed out after {timeout} waiting for: {conditionDescription}");
+        builder.Append($"WaitUntil timed out after {elapsed} (timeout {timeout}) waiting for: {conditionDescription}");
 
         if (callerFilePath is not null)
         {
