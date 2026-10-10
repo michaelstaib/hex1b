@@ -311,6 +311,52 @@ public class LayoutNodeAnsiClippingTests
         Assert.AreEqual("A", clipped);
     }
 
+    [TestMethod]
+    public void VisibleLength_PlainAsciiWithSequences_CountsOnlyPrintableColumns()
+    {
+        Assert.AreEqual(5, AnsiString.VisibleLength("\x1b[31mHello\x1b[0m"));
+        Assert.AreEqual(4, AnsiString.VisibleLength("\x1b]8;;http://example.com\x1b\\link\x1b]8;;\x1b\\"));
+        Assert.AreEqual(4, AnsiString.VisibleLength("\x1b]8;;http://example.com\x07link\x1b]8;;\x07"));
+        Assert.AreEqual(0, AnsiString.VisibleLength("\x1b[31m\x1b[0m"));
+        Assert.AreEqual(0, AnsiString.VisibleLength(""));
+    }
+
+    [TestMethod]
+    public void VisibleLength_UnterminatedSequencesAndStrayEscape_AreMeasuredAsText()
+    {
+        // Pins current behaviour: only complete CSI and OSC sequences are stripped. Anything else,
+        // including the "[31;" after a lone ESC, is measured as text (ESC itself is zero width).
+        Assert.AreEqual(2 + 4, AnsiString.VisibleLength("AB\x1b[31;"));
+        Assert.AreEqual(2 + 4, AnsiString.VisibleLength("AB\x1b]8;;"));
+        Assert.AreEqual(2, AnsiString.VisibleLength("AB\x1b"));
+        Assert.AreEqual(3, AnsiString.VisibleLength("A\x1bXB"));
+    }
+
+    [TestMethod]
+    public void VisibleLength_CombiningMarkAfterRemovedSequence_JoinsThePrecedingCharacter()
+    {
+        // Pins current behaviour: sequences are stripped before the text is segmented, so a mark
+        // that follows a CSI combines with the character before the CSI.
+        Assert.AreEqual(1, AnsiString.VisibleLength("e\x1b[31m\u0301"));
+        Assert.AreEqual(2, AnsiString.VisibleLength("e\x1b[31m\u0301e"));
+    }
+
+    [TestMethod]
+    public void VisibleLength_NonAsciiText_MeasuresGraphemeWidths()
+    {
+        var family = "\U0001F468\u200D\U0001F469\u200D\U0001F467";
+
+        Assert.AreEqual(2 + 1 + 2 + 1 + 2, AnsiString.VisibleLength($"\x1b[31m{family}e\u0301\u4E2D\U0001F1FA\U0001F1F8 \x1b[0m"));
+    }
+
+    [TestMethod]
+    public void VisibleLength_TextLongerThanScratchBuffer_MeasuresAllColumns()
+    {
+        var text = "\x1b[31m" + string.Concat(Enumerable.Repeat("\u4E2D", 300)) + "\x1b[0m" + new string('x', 100);
+
+        Assert.AreEqual(300 * 2 + 100, AnsiString.VisibleLength(text));
+    }
+
     private static void AssertValidAnsiCsiSequences(string text)
     {
         for (var i = 0; i < text.Length; i++)
