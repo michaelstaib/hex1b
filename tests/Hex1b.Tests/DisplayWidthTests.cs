@@ -530,6 +530,102 @@ public class DisplayWidthTests
         Assert.AreEqual(("AB", 2, 0, 0), result);
     }
 
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_LoneHighSurrogate_IsTreatedAsOneColumnGrapheme()
+    {
+        // Pins current behaviour: an unpaired high surrogate is a grapheme of its own and is kept.
+        var text = "A\uD83DB";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual((text, 3, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_LoneHighSurrogateAtEnd_IsKept()
+    {
+        var text = "AB\uD83D";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual((text, 3, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_LoneLowSurrogate_IsTreatedAsOneColumnGrapheme()
+    {
+        var text = "A\uDE00B";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual((text, 3, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_UnterminatedCsi_IsConsumedToEndAndKept()
+    {
+        // Pins current behaviour: an incomplete CSI swallows the rest of the text without
+        // counting columns, and the slicer keeps it.
+        var text = "AB\x1b[31;";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual((text, 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_UnterminatedCsiBeforeText_SwallowsTheText()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31; 12", 0, 80);
+
+        Assert.AreEqual(("", 0, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_UnterminatedOsc_IsConsumedToEndAndKept()
+    {
+        var text = "AB\x1b]8;;http://example.com";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual((text, 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_UnterminatedOscBeforeVisibleText_SwallowsTheText()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b]8;;http://example.comAB", 0, 80);
+
+        Assert.AreEqual(("", 0, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_TextEndingInEscape_KeepsTheZeroWidthEscape()
+    {
+        // Pins current behaviour: a trailing ESC that starts no sequence is a zero-width grapheme
+        // and is kept once output has started.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("AB\x1b", 0, 80);
+
+        Assert.AreEqual(("AB\x1b", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_EscapeFollowedByOtherByte_KeepsTheEscapeAsZeroWidthText()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("A\x1bXB", 0, 80);
+
+        Assert.AreEqual(("A\x1bXB", 3, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_CombiningMarkAfterCsi_IsKeptAsSeparateGrapheme()
+    {
+        // Pins current behaviour: the mark after a CSI is zero width. It is kept once output has
+        // started, and dropped when it is the first thing in the line.
+        Assert.AreEqual(("A\x1b[31m\u0301B", 2, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("A\x1b[31m\u0301B", 0, 80));
+        Assert.AreEqual(("\x1b[31mB", 1, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m\u0301B", 0, 80));
+    }
+
     #endregion
 
     #region Integration with GraphemeHelper

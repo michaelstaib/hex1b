@@ -236,6 +236,81 @@ public class LayoutNodeAnsiClippingTests
         Assert.AreEqual("_Gi=", clipped);
     }
 
+    [TestMethod]
+    public void ClipString_LoneHighSurrogate_IsKeptAsOneColumn()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 80, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "A\uD83DB");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("A\uD83DB", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_UnterminatedCsiAfterText_CountsEscapeAndParametersAsVisible()
+    {
+        // Pins current behaviour: VisibleLength does not treat the incomplete CSI as a sequence
+        // (the ESC is zero width, "[31;" counts as 4 columns), while the slicer swallows it.
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 80, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "AB\x1b[31;");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("AB\x1b[31;", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_UnterminatedOscAfterText_IsKept()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 80, 1));
+        var text = "AB\x1b]8;;http://example.com";
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, text);
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual(text, clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_UnterminatedCsiBeforeText_ReturnsEmpty()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 80, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b[31; 12");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_TextEndingInEscape_KeepsTheZeroWidthEscape()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 80, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "AB\x1b");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("AB\x1b", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_TextEndingInEscapeClippedOnRight_KeepsOnlyVisibleText()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 1, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "AB\x1b");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("A", clipped);
+    }
+
     private static void AssertValidAnsiCsiSequences(string text)
     {
         for (var i = 0; i < text.Length; i++)
