@@ -271,6 +271,267 @@ public class DisplayWidthTests
 
     #endregion
 
+    #region Slice By Display Width With ANSI (pinned behaviour)
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_PlainAsciiThatFits_ReturnsInputUnchanged()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("Hello World", 0, 80);
+
+        Assert.AreEqual(("Hello World", 11, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_PlainAsciiInMiddle_ReturnsRequestedColumns()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("Hello World", 3, 5);
+
+        Assert.AreEqual(("lo Wo", 5, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_EmptyTextOrNoColumns_ReturnsEmpty()
+    {
+        Assert.AreEqual(("", 0, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("", 0, 5));
+        Assert.AreEqual(("", 0, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("abc", 0, 0));
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_StartBeyondText_ReturnsEmpty()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("abc", 5, 3);
+
+        Assert.AreEqual(("", 0, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_CsiAroundText_KeepsLeadingAndTrailingSequences()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31mABCDE\x1b[0m", 1, 4);
+
+        Assert.AreEqual(("\x1b[31mBCDE\x1b[0m", 4, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_CsiInsideSkippedRegion_MovesToPrefixInOrder()
+    {
+        var text = "\x1b[1mA\x1b[2mB\x1b[3mCD";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 2, 1);
+
+        Assert.AreEqual(("\x1b[1m\x1b[2m\x1b[3mC", 1, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_CsiBetweenIncludedCharacters_IsKeptInPlace()
+    {
+        var text = "A\x1b[31mB\x1b[0mC";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 3);
+
+        Assert.AreEqual((text, 3, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ClippedOnRight_KeepsOnlyImmediatelyTrailingCsi()
+    {
+        // Pins current behaviour: only escape sequences directly after the last included
+        // grapheme are kept; a reset that follows dropped text is lost.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31mABC\x1b[0mDE\x1b[0m", 0, 3);
+
+        Assert.AreEqual(("\x1b[31mABC\x1b[0m", 3, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ClippedBeforeTrailingReset_DropsReset()
+    {
+        // Pins current behaviour: the reset after the dropped text is not kept by the slicer.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31mABCDE\x1b[0m", 0, 3);
+
+        Assert.AreEqual(("\x1b[31mABC", 3, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_OscHyperlinkWithStTerminator_KeptWithoutCountingColumns()
+    {
+        var text = "\x1b]8;;http://example.com\x1b\\link\x1b]8;;\x1b\\";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 10);
+
+        Assert.AreEqual((text, 4, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_OscHyperlinkWithBelTerminator_KeptWithoutCountingColumns()
+    {
+        var text = "\x1b]8;;http://example.com\x07link\x1b]8;;\x07";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 10);
+
+        Assert.AreEqual((text, 4, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_OscHyperlinkClippedOnRight_DropsClosingSequence()
+    {
+        // Pins current behaviour: the OSC 8 opener is kept but the closer after the
+        // dropped text is not, so the slicer alone leaves the hyperlink open.
+        var text = "\x1b]8;;http://example.com\x1b\\link\x1b]8;;\x1b\\";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 2);
+
+        Assert.AreEqual(("\x1b]8;;http://example.com\x1b\\li", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_DcsSequence_IsNotRecognisedAndCountsAsText()
+    {
+        // Pins current behaviour: only CSI and OSC are parsed. DCS (ESC P ... ST) is not skipped:
+        // the leading ESC is a zero-width grapheme and is dropped, while the payload letters count
+        // as 7 visible columns and the ESC inside the sequence is kept.
+        var text = "\x1bPq#0\x1b\\AB";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual(("Pq#0\x1b\\AB", 7, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ApcSequence_IsNotRecognisedAndCountsAsText()
+    {
+        // Pins current behaviour: only CSI and OSC are parsed. APC (ESC _ ... ST) is not skipped:
+        // the leading ESC is a zero-width grapheme and is dropped, while the payload letters count
+        // as 8 visible columns and the ESC inside the sequence is kept.
+        var text = "\x1b_Gi=1\x1b\\AB";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual(("_Gi=1\x1b\\AB", 8, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_LeadingZeroWidthGrapheme_IsDropped()
+    {
+        // Pins current behaviour: a zero-width grapheme at the start is skipped (it fits in
+        // the columns before startColumn) and never reaches the output.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\u0301AB", 0, 5);
+
+        Assert.AreEqual(("AB", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_LeadingZeroWidthGraphemeAfterSgr_IsDroppedButSgrKept()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m\u0301AB", 0, 5);
+
+        Assert.AreEqual(("\x1b[31mAB", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ZeroWidthSpace_CountsAsOneColumn()
+    {
+        // Pins current behaviour: U+200B is measured as one column, so it takes a slot at the cut.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("AB\u200BCD", 2, 2);
+
+        Assert.AreEqual(("\u200BC", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_WideCharacterSplitAtLeftEdge_ReportsPaddingBefore()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("中AB", 1, 3);
+
+        Assert.AreEqual(("AB", 2, 1, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_WideCharacterSplitAtRightEdge_ReportsPaddingAfter()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("AB中", 0, 3);
+
+        Assert.AreEqual(("AB", 2, 0, 1), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_WideCharactersSplitAtBothEdges_ReportsBothPaddings()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("中AB文", 1, 3);
+
+        Assert.AreEqual(("AB", 2, 1, 1), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_WideCharacterExactlyFits_NoPadding()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("A中B", 1, 2);
+
+        Assert.AreEqual(("中", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_WideCharacterSplitAtLeftEdgeWithSgr_SgrKeptForRemainingText()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m中文\x1b[0m", 1, 3);
+
+        Assert.AreEqual(("\x1b[31m文\x1b[0m", 2, 1, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_WideCharacterOnlyOneColumnAvailable_ReportsPaddingAfterAndNoText()
+    {
+        // Pins current behaviour: when the first grapheme is wide and only one column is
+        // available, the text is empty and paddingAfter is 1.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("中", 0, 1);
+
+        Assert.AreEqual(("", 0, 0, 1), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_GraphemeHeavyLineThatFits_ReturnsInputUnchanged()
+    {
+        // Family ZWJ emoji, e + combining acute, flag, skin-tone emoji, VS16 emoji, CJK.
+        var text = "\U0001F468\u200D\U0001F469\u200D\U0001F467 e\u0301 \U0001F1FA\U0001F1F8 \U0001F44D\U0001F3FD \U0001F5A5\uFE0F \u4E2D";
+        var width = DisplayWidth.GetStringWidth(text);
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual((text, width, 0, 0), result);
+        Assert.AreEqual(2 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 2, width);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_GraphemeHeavyLineClipped_NeverSplitsAGraphemeCluster()
+    {
+        var family = "\U0001F468\u200D\U0001F469\u200D\U0001F467";
+        var text = $"{family}e\u0301X";
+
+        // family (2) + e+acute (1) fits in 3 columns; X is dropped.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 3);
+
+        Assert.AreEqual(($"{family}e\u0301", 3, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ZwjEmojiSplitAtLeftEdge_ReportsPaddingBefore()
+    {
+        var family = "\U0001F468\u200D\U0001F469\u200D\U0001F467";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi($"{family}AB", 1, 5);
+
+        Assert.AreEqual(("AB", 2, 1, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_CombiningMarkAfterSkippedBase_IsSkippedWithItsBase()
+    {
+        // "e" + U+0301 is one cluster of width 1, so skipping column 0 skips both code points.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("e\u0301AB", 1, 5);
+
+        Assert.AreEqual(("AB", 2, 0, 0), result);
+    }
+
+    #endregion
+
     #region Integration with GraphemeHelper
 
     [TestMethod]
