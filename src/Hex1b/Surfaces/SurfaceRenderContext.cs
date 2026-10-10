@@ -1398,13 +1398,12 @@ public class SurfaceRenderContext : Hex1bRenderContext
             return "";
         }
 
-        // PERF: StringInfo.GetTextElementEnumerator allocates a new string per call.
-        // GetNextGrapheme is called for EVERY character written to a surface cell during
-        // rendering, making it one of the highest-frequency allocation sites.
+        // PERF: GetNextGrapheme is called for EVERY character written to a surface cell during
+        // rendering, making it one of the highest-frequency allocation sites. char.ToString() and
+        // the text element enumerator both allocate a new string per call, so the strings come
+        // from GraphemeStringCache, which hands out shared instances.
         //
         // For printable ASCII (0x20–0x7E), each char is always a complete single-char grapheme.
-        // char.ToString() for chars <= 0x7F returns a cached (interned) string in .NET 6+,
-        // making this path entirely allocation-free.
         //
         // PITFALL: We must also check that the NEXT character is ASCII (or end-of-string).
         // Keycap emoji sequences start with an ASCII char followed by U+FE0F (variation
@@ -1417,24 +1416,15 @@ public class SurfaceRenderContext : Hex1bRenderContext
             && (start + 1 >= text.Length || text[start + 1] < 0x80))
         {
             charCount = 1;
-            return ch.ToString();
+            return GraphemeStringCache.GetAscii(ch);
         }
-        
-        // Use .NET's grapheme cluster enumeration to properly handle:
+
+        // Use .NET's grapheme cluster segmentation to properly handle:
         // - Surrogate pairs (emoji like 🖥)
         // - Combining characters (variation selectors like U+FE0F)
         // - Extended grapheme clusters (emoji + skin tones, ZWJ sequences)
-        var enumerator = System.Globalization.StringInfo.GetTextElementEnumerator(text, start);
-        if (enumerator.MoveNext())
-        {
-            var grapheme = enumerator.GetTextElement();
-            charCount = grapheme.Length;
-            return grapheme;
-        }
-        
-        // Fallback (shouldn't happen)
-        charCount = 1;
-        return ch.ToString();
+        charCount = System.Globalization.StringInfo.GetNextTextElementLength(text.AsSpan(start));
+        return GraphemeStringCache.Get(text.AsSpan(start, charCount));
     }
 
     /// <summary>
