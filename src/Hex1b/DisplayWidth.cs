@@ -50,18 +50,27 @@ public static class DisplayWidth
     /// </summary>
     public static int GetGraphemeWidth(string grapheme)
     {
-        if (string.IsNullOrEmpty(grapheme))
+        return GetGraphemeWidth(grapheme.AsSpan());
+    }
+
+    /// <summary>
+    /// Span form of <see cref="GetGraphemeWidth(string)"/> so callers that already know the extent
+    /// of a cluster do not have to allocate a string for it.
+    /// </summary>
+    internal static int GetGraphemeWidth(ReadOnlySpan<char> grapheme)
+    {
+        if (grapheme.IsEmpty)
             return 0;
 
         // Most grapheme clusters display as a single unit.
         // Emoji sequences (ZWJ, skin tones, flags) typically display as 2 cells.
         // Combining sequences display as the width of their base character.
-        
+
         // Check for variation selectors first - they explicitly set the presentation
         bool hasVS16 = false;  // U+FE0F - emoji presentation (wide)
         bool hasVS15 = false;  // U+FE0E - text presentation (narrow)
         bool hasKeycap = false; // U+20E3 - combining enclosing keycap
-        
+
         foreach (var rune in grapheme.EnumerateRunes())
         {
             if (rune.Value == 0x20E3) // Combining enclosing keycap
@@ -71,11 +80,11 @@ public static class DisplayWidth
             if (rune.Value == 0xFE0E) // Variation selector-15 (text presentation)
                 hasVS15 = true;
         }
-        
+
         // Keycap sequences are always 2 cells wide (like 1️⃣)
         if (hasKeycap)
             return 2;
-        
+
         // VS16 forces emoji presentation (2 cells) — but ONLY if the base character
         // has the Unicode Emoji property. VS16 on non-emoji characters (like 'n') is
         // ignored per Unicode spec and all major terminals (kitty, WezTerm, xterm, Ghostty).
@@ -91,10 +100,10 @@ public static class DisplayWidth
                 break; // Base is not emoji — ignore VS16
             }
         }
-        
+
         // VS15 forces text presentation - use GetRuneWidth for the base character
         // (fall through to normal width calculation)
-        
+
         int width = 0;
         foreach (var rune in grapheme.EnumerateRunes())
         {
@@ -106,24 +115,24 @@ public static class DisplayWidth
                 {
                     return 2;
                 }
-                
+
                 // For BMP characters with Emoji_Presentation property (like ✅❌),
                 // default to emoji presentation (2 cells) unless VS15 is present
                 if (!hasVS15 && HasDefaultEmojiPresentation(rune.Value))
                 {
                     return 2;
                 }
-                
+
                 // For other BMP characters (including those that CAN be emoji like ✓),
                 // default to text presentation (1 cell) unless VS16 was present
                 width = Math.Max(width, runeWidth);
             }
         }
-        
+
         // If no visible characters, return 0
         return width;
     }
-    
+
     /// <summary>
     /// Checks if a BMP codepoint has the Emoji_Presentation property,
     /// meaning it defaults to emoji (wide) presentation without needing VS16.
@@ -135,7 +144,7 @@ public static class DisplayWidth
         // Characters with Emoji=Yes but Emoji_Presentation=No (like ❤ U+2764)
         // only become wide with VS16 — they are NOT listed here.
         // See: https://www.unicode.org/Public/16.0.0/ucd/emoji/emoji-data.txt
-        
+
         return codePoint switch
         {
             // Miscellaneous Technical
@@ -147,11 +156,11 @@ public static class DisplayWidth
             0x23EC => true,  // ⏬ Fast Down
             0x23F0 => true,  // ⏰ Alarm Clock
             0x23F3 => true,  // ⏳ Hourglass Not Done
-            
+
             // Geometric Shapes
             0x25FD => true,  // ◽ White Medium-Small Square
             0x25FE => true,  // ◾ Black Medium-Small Square
-            
+
             // Miscellaneous Symbols
             0x2614 => true,  // ☔ Umbrella With Rain Drops
             0x2615 => true,  // ☕ Hot Beverage
@@ -184,7 +193,7 @@ public static class DisplayWidth
             0x26F5 => true,  // ⛵ Sailboat
             0x26FA => true,  // ⛺ Tent
             0x26FD => true,  // ⛽ Fuel Pump
-            
+
             // Dingbats
             0x2705 => true,  // ✅ Check Mark Button
             0x270A => true,  // ✊ Raised Fist
@@ -201,23 +210,23 @@ public static class DisplayWidth
             0x2797 => true,  // ➗ Divide
             0x27B0 => true,  // ➰ Curly Loop
             0x27BF => true,  // ➿ Double Curly Loop
-            
+
             // Geometric Shapes (arrows and squares)
             0x2B1B => true,  // ⬛ Black Large Square
             0x2B1C => true,  // ⬜ White Large Square
             0x2B50 => true,  // ⭐ Star
             0x2B55 => true,  // ⭕ Heavy Large Circle
-            
+
             // CJK Symbols
             0x3030 => true,  // 〰 Wavy Dash
             0x303D => true,  // 〽 Part Alternation Mark
             0x3297 => true,  // ㊗ Japanese "Congratulations"
             0x3299 => true,  // ㊙ Japanese "Secret"
-            
+
             _ => false
         };
     }
-    
+
     /// <summary>
     /// Checks if a codepoint is in the Supplementary Multilingual Plane (SMP) emoji ranges.
     /// These characters default to emoji presentation (width 2).
@@ -227,7 +236,7 @@ public static class DisplayWidth
     {
         // SMP Emoji Blocks (U+1F000 - U+1FFFF range)
         // These default to emoji presentation
-        
+
         // Mahjong Tiles and Domino Tiles
         if (codePoint >= 0x1F000 && codePoint <= 0x1F0FF)
             return true;
@@ -264,7 +273,7 @@ public static class DisplayWidth
         // Chess Symbols, Symbols and Pictographs Extended-A/B
         if (codePoint >= 0x1FA00 && codePoint <= 0x1FAFF)
             return true;
-            
+
         return false;
     }
 
@@ -416,13 +425,20 @@ public static class DisplayWidth
     /// </summary>
     public static int GetStringWidth(string text)
     {
-        if (string.IsNullOrEmpty(text))
+        return GetStringWidth(text.AsSpan());
+    }
+
+    /// <summary>
+    /// Span form of <see cref="GetStringWidth(string)"/>; walks the clusters without allocating.
+    /// </summary>
+    internal static int GetStringWidth(ReadOnlySpan<char> text)
+    {
+        if (text.IsEmpty)
             return 0;
 
-        // PERF: StringInfo.GetTextElementEnumerator allocates a new string per grapheme cluster.
-        // For printable ASCII (0x20–0x7E), every char is exactly one display column and one
+        // PERF: For printable ASCII (0x20–0x7E), every char is exactly one display column and one
         // grapheme cluster, so we can return text.Length directly. This fast-path avoids all
-        // allocations for the common case of ASCII-only content (labels, borders, padding).
+        // segmentation for the common case of ASCII-only content (labels, borders, padding).
         //
         // PITFALL: Control chars (< 0x20) and DEL (0x7F) are zero-width; chars >= 0x80 may be
         // multi-column (CJK) or combining marks. Any such char forces the slow path.
@@ -437,15 +453,15 @@ public static class DisplayWidth
 
         return text.Length;
 
-        SlowPath:
+    SlowPath:
         int totalWidth = 0;
-        var enumerator = StringInfo.GetTextElementEnumerator(text);
-        while (enumerator.MoveNext())
+        while (!text.IsEmpty)
         {
-            var grapheme = (string)enumerator.Current;
-            totalWidth += GetGraphemeWidth(grapheme);
+            var length = StringInfo.GetNextTextElementLength(text);
+            totalWidth += GetGraphemeWidth(text[..length]);
+            text = text[length..];
         }
-        
+
         return totalWidth;
     }
 
@@ -479,20 +495,20 @@ public static class DisplayWidth
         int columnsUsed = 0;
         int paddingBefore = 0;
         int paddingAfter = 0;
-        
+
         var enumerator = StringInfo.GetTextElementEnumerator(text);
         while (enumerator.MoveNext())
         {
             var grapheme = (string)enumerator.Current;
             var graphemeWidth = GetGraphemeWidth(grapheme);
-            
+
             // Skip graphemes before start column
             if (currentColumn + graphemeWidth <= startColumn)
             {
                 currentColumn += graphemeWidth;
                 continue;
             }
-            
+
             // Check if we're starting in the middle of a wide character
             if (currentColumn < startColumn && currentColumn + graphemeWidth > startColumn)
             {
@@ -501,7 +517,7 @@ public static class DisplayWidth
                 currentColumn += graphemeWidth;
                 continue;
             }
-            
+
             // Check if adding this grapheme would exceed our limit
             if (columnsUsed + graphemeWidth > maxColumns)
             {
@@ -513,12 +529,12 @@ public static class DisplayWidth
                 }
                 break;
             }
-            
+
             result.Append(grapheme);
             columnsUsed += graphemeWidth;
             currentColumn += graphemeWidth;
         }
-        
+
         return (result.ToString(), columnsUsed, paddingBefore, paddingAfter);
     }
 
@@ -567,7 +583,7 @@ public static class DisplayWidth
                     i++;
                 }
                 var seq = text.Substring(seqStart, i - seqStart);
-                
+
                 // Add to prefix or result depending on whether we've started
                 if (!started)
                     prefix.Append(seq);
@@ -575,7 +591,7 @@ public static class DisplayWidth
                     result.Append(seq);
                 continue;
             }
-            
+
             // Check for OSC escape sequence (ESC ] ... ST) - OSC sequences like OSC 8 hyperlinks
             // ST (String Terminator) can be ESC \ or BEL (\x07)
             if (text[i] == '\x1b' && i + 1 < text.Length && text[i + 1] == ']')
@@ -599,7 +615,7 @@ public static class DisplayWidth
                     i++;
                 }
                 var seq = text.Substring(seqStart, i - seqStart);
-                
+
                 // Add to prefix or result depending on whether we've started
                 if (!started)
                     prefix.Append(seq);
@@ -776,7 +792,7 @@ public static class DisplayWidth
         // the base emoji determines the width. When they are standalone (split off by
         // GetGraphemeAt because the base was not Emoji_Modifier_Base), they render as
         // independent wide characters (2 cells), matching Ghostty and other terminals.
-        
+
         // Fallback: use Unicode general category for nonspacing marks (Mn) and
         // enclosing marks (Me). This covers combining marks in all scripts
         // (Devanagari virama U+094D, Arabic marks, Hebrew points, etc.)
@@ -787,7 +803,7 @@ public static class DisplayWidth
                 category == System.Globalization.UnicodeCategory.EnclosingMark)
                 return true;
         }
-            
+
         return false;
     }
 
@@ -813,41 +829,41 @@ public static class DisplayWidth
             return true;
         if (codePoint >= 0x30000 && codePoint <= 0x3134F) // CJK Extension G
             return true;
-            
+
         // CJK Compatibility Ideographs
         if (codePoint >= 0xF900 && codePoint <= 0xFAFF)
             return true;
         if (codePoint >= 0x2F800 && codePoint <= 0x2FA1F)
             return true;
-            
+
         // Hangul Syllables
         if (codePoint >= 0xAC00 && codePoint <= 0xD7AF)
             return true;
-            
+
         // Hangul Jamo Extended
         if (codePoint >= 0xA960 && codePoint <= 0xA97F)
             return true;
         if (codePoint >= 0xD7B0 && codePoint <= 0xD7FF)
             return true;
-            
+
         // Katakana and Hiragana
         if (codePoint >= 0x3040 && codePoint <= 0x30FF)
             return true;
         if (codePoint >= 0x31F0 && codePoint <= 0x31FF) // Katakana Phonetic Extensions
             return true;
-            
+
         // Fullwidth Forms
         if (codePoint >= 0xFF00 && codePoint <= 0xFF60)
             return true;
         if (codePoint >= 0xFFE0 && codePoint <= 0xFFE6)
             return true;
-            
+
         // SMP Emoji are wide (but BMP emoji default to text presentation unless VS16)
         // Note: BMP characters like ✓ (U+2713) are handled by GetGraphemeWidth
         // which checks for VS16 to determine emoji vs text presentation
         if (IsSmpEmoji(codePoint))
             return true;
-            
+
         return false;
     }
 
@@ -859,7 +875,7 @@ public static class DisplayWidth
     {
         // SMP Emoji Blocks (U+1F000 - U+1FFFF range)
         // Using broader ranges to be more future-proof
-        
+
         // Mahjong Tiles and Domino Tiles
         if (codePoint >= 0x1F000 && codePoint <= 0x1F0FF)
             return true;
@@ -897,9 +913,9 @@ public static class DisplayWidth
         // Chess Symbols, Symbols and Pictographs Extended-A/B
         if (codePoint >= 0x1FA00 && codePoint <= 0x1FAFF)
             return true;
-        
+
         // BMP Emoji Blocks
-        
+
         // Miscellaneous Symbols (☀️⚡⚠️ etc)
         if (codePoint >= 0x2600 && codePoint <= 0x26FF)
             return true;
@@ -918,7 +934,7 @@ public static class DisplayWidth
         // Enclosed CJK Letters and Months
         if (codePoint >= 0x3300 && codePoint <= 0x33FF)
             return true;
-            
+
         // Specific standalone emoji characters
         // Copyright, Registered, Trademark
         if (codePoint == 0x00A9 || codePoint == 0x00AE || codePoint == 0x2122)
@@ -957,7 +973,7 @@ public static class DisplayWidth
         // - U+25B6, U+25C0 (play/reverse triangles - used as scroll arrows)
         // - U+25FB-U+25FE (medium squares)
         // If they were listed here, they'd incorrectly be width 2 in text mode.
-            
+
         return false;
     }
 
