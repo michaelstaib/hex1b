@@ -710,6 +710,24 @@ public class DisplayWidthTests
 
     #endregion
 
+    #region Null and empty input
+
+    [TestMethod]
+    public void GetStringWidth_NullOrEmpty_ReturnsZero()
+    {
+        Assert.AreEqual(0, DisplayWidth.GetStringWidth(null!));
+        Assert.AreEqual(0, DisplayWidth.GetStringWidth(""));
+    }
+
+    [TestMethod]
+    public void GetGraphemeWidth_NullOrEmpty_ReturnsZero()
+    {
+        Assert.AreEqual(0, DisplayWidth.GetGraphemeWidth(null!));
+        Assert.AreEqual(0, DisplayWidth.GetGraphemeWidth(""));
+    }
+
+    #endregion
+
     #region Integration with GraphemeHelper
 
     [TestMethod]
