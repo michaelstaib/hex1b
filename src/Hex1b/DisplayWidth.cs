@@ -555,78 +555,62 @@ public static class DisplayWidth
         if (string.IsNullOrEmpty(text) || maxColumns <= 0)
             return ("", 0, 0, 0);
 
-        var prefix = new StringBuilder(); // ANSI codes before first visible char
-        var result = new StringBuilder();
+        // Escape sequences before the first included grapheme are the prefix; the result is empty
+        // until that grapheme is reached, so one builder holds prefix and result in order.
+        var result = t_sliceBuilder ??= new StringBuilder(256);
+        result.Clear();
+
         int currentColumn = 0;
         int columnsUsed = 0;
         int paddingBefore = 0;
         int paddingAfter = 0;
         bool started = false;
 
+        // True while i is known to be a grapheme boundary of the whole text. The original
+        // implementation looked every grapheme up by index in an enumeration of the whole text
+        // and fell back to a single character where the index was inside a cluster. That can only
+        // happen right after an escape sequence (the sequence's last character is segmented with
+        // what follows it), so the cheap forward segmentation is used while the boundary is
+        // known and the lookup by index only until a boundary is found again.
+        bool atBoundary = true;
+
         int i = 0;
         while (i < text.Length)
         {
-            // Check for ANSI escape sequence (ESC [ ... final byte) - CSI sequences
-            if (text[i] == '\x1b' && i + 1 < text.Length && text[i + 1] == '[')
+            // CSI sequences (ESC [ ... final byte) and OSC sequences (ESC ] ... ST, where ST is
+            // ESC \ or BEL) are kept without counting columns.
+            if (text[i] == '\x1b' && i + 1 < text.Length && (text[i + 1] == '[' || text[i + 1] == ']'))
             {
-                // Find the end of the CSI sequence
-                var seqStart = i;
-                i += 2; // Skip ESC [
-                while (i < text.Length)
-                {
-                    var c = text[i];
-                    if (c >= '@' && c <= '~')
-                    {
-                        i++; // Include final byte
-                        break;
-                    }
-                    i++;
-                }
-                var seq = text.Substring(seqStart, i - seqStart);
-
-                // Add to prefix or result depending on whether we've started
-                if (!started)
-                    prefix.Append(seq);
-                else
-                    result.Append(seq);
+                var sequenceEnd = text[i + 1] == '[' ? SkipCsiSequence(text, i) : SkipOscSequence(text, i);
+                result.Append(text, i, sequenceEnd - i);
+                i = sequenceEnd;
+                atBoundary = IsGraphemeBoundaryAfterSequence(text, i);
                 continue;
             }
 
-            // Check for OSC escape sequence (ESC ] ... ST) - OSC sequences like OSC 8 hyperlinks
-            // ST (String Terminator) can be ESC \ or BEL (\x07)
-            if (text[i] == '\x1b' && i + 1 < text.Length && text[i + 1] == ']')
+            // Get the extent and width of the grapheme cluster at this position
+            int graphemeLength;
+            int graphemeWidth;
+            var c = text[i];
+            if (atBoundary)
             {
-                var seqStart = i;
-                i += 2; // Skip ESC ]
-                while (i < text.Length)
+                if (c >= 0x20 && c < 0x7F && (i + 1 >= text.Length || text[i + 1] < 0x80))
                 {
-                    // Check for ST = ESC \ (two characters)
-                    if (text[i] == '\x1b' && i + 1 < text.Length && text[i + 1] == '\\')
-                    {
-                        i += 2; // Include ESC \
-                        break;
-                    }
-                    // Check for ST = BEL (single character \x07)
-                    if (text[i] == '\x07')
-                    {
-                        i++; // Include BEL
-                        break;
-                    }
-                    i++;
+                    // Printable ASCII that is not followed by a possible combining character.
+                    graphemeLength = 1;
+                    graphemeWidth = 1;
                 }
-                var seq = text.Substring(seqStart, i - seqStart);
-
-                // Add to prefix or result depending on whether we've started
-                if (!started)
-                    prefix.Append(seq);
                 else
-                    result.Append(seq);
-                continue;
+                {
+                    graphemeLength = StringInfo.GetNextTextElementLength(text.AsSpan(i));
+                    graphemeWidth = GetGraphemeWidth(text.AsSpan(i, graphemeLength));
+                }
             }
-
-            // Get the grapheme cluster at this position
-            var grapheme = GetGraphemeAtIndex(text, i, out var graphemeLength);
-            var graphemeWidth = GetGraphemeWidth(grapheme);
+            else
+            {
+                graphemeLength = GetGraphemeLengthAtIndex(text, i, out atBoundary);
+                graphemeWidth = GetGraphemeWidth(text.AsSpan(i, graphemeLength));
+            }
 
             // Skip graphemes before start column
             if (currentColumn + graphemeWidth <= startColumn)
@@ -658,87 +642,91 @@ public static class DisplayWidth
                 break;
             }
 
-            if (!started)
-            {
-                result.Append(prefix);
-                started = true;
-            }
-
-            result.Append(grapheme);
+            started = true;
+            result.Append(text, i, graphemeLength);
             columnsUsed += graphemeWidth;
             currentColumn += graphemeWidth;
             i += graphemeLength;
         }
 
-        // Collect any trailing ANSI sequences (CSI and OSC)
+        // The loop only stops at a grapheme, never at an escape sequence, so there are no
+        // trailing sequences to collect.
+        var slice = started ? result.ToString() : "";
+        if (result.Capacity > MaxCachedSliceBuilderCapacity)
+            t_sliceBuilder = null;
+
+        return (slice, columnsUsed, paddingBefore, paddingAfter);
+    }
+
+    private const int MaxCachedSliceBuilderCapacity = 4096;
+
+    [ThreadStatic]
+    private static StringBuilder? t_sliceBuilder;
+
+    /// <summary>
+    /// Returns the index just past a CSI sequence that starts at <paramref name="start"/>
+    /// (ESC [ ... final byte), or the end of the text if it has no final byte.
+    /// </summary>
+    private static int SkipCsiSequence(string text, int start)
+    {
+        var i = start + 2; // Skip ESC [
         while (i < text.Length)
         {
-            // CSI sequences
-            if (text[i] == '\x1b' && i + 1 < text.Length && text[i + 1] == '[')
-            {
-                var seqStart = i;
-                i += 2;
-                while (i < text.Length)
-                {
-                    var c = text[i];
-                    if (c >= '@' && c <= '~')
-                    {
-                        i++;
-                        break;
-                    }
-                    i++;
-                }
-                result.Append(text.Substring(seqStart, i - seqStart));
-                continue;
-            }
-            // OSC sequences
-            if (text[i] == '\x1b' && i + 1 < text.Length && text[i + 1] == ']')
-            {
-                var seqStart = i;
-                i += 2;
-                while (i < text.Length)
-                {
-                    if (text[i] == '\x1b' && i + 1 < text.Length && text[i + 1] == '\\')
-                    {
-                        i += 2;
-                        break;
-                    }
-                    if (text[i] == '\x07')
-                    {
-                        i++;
-                        break;
-                    }
-                    i++;
-                }
-                result.Append(text.Substring(seqStart, i - seqStart));
-                continue;
-            }
-            break;
+            var c = text[i];
+            i++;
+            if (c >= '@' && c <= '~')
+                break; // Final byte included
         }
-
-        return (result.ToString(), columnsUsed, paddingBefore, paddingAfter);
+        return i;
     }
 
     /// <summary>
-    /// Gets the grapheme cluster at the specified index in a string.
+    /// Returns the index just past an OSC sequence that starts at <paramref name="start"/>
+    /// (ESC ] ... ST, with ST being ESC \ or BEL), or the end of the text if it is not terminated.
     /// </summary>
-    private static string GetGraphemeAtIndex(string text, int index, out int length)
+    private static int SkipOscSequence(string text, int start)
     {
-        if (index >= text.Length)
+        var i = start + 2; // Skip ESC ]
+        while (i < text.Length)
         {
-            length = 0;
-            return "";
+            if (text[i] == '\x1b' && i + 1 < text.Length && text[i + 1] == '\\')
+                return i + 2; // Include ESC \
+            if (text[i] == '\x07')
+                return i + 1; // Include BEL
+            i++;
         }
+        return i;
+    }
 
+    /// <summary>
+    /// Determines whether the index just past an escape sequence is a grapheme boundary of the
+    /// whole text. The sequence ends in an ASCII character (final byte, backslash or BEL), and
+    /// the boundary rules between such a character and the next one do not depend on anything
+    /// before it, so only a following combining mark, joiner or spacing mark can attach to it.
+    /// </summary>
+    private static bool IsGraphemeBoundaryAfterSequence(string text, int index)
+    {
+        if (index >= text.Length || text[index] < 0x80)
+            return true;
+
+        return StringInfo.GetNextTextElementLength(text.AsSpan(index - 1)) == 1;
+    }
+
+    /// <summary>
+    /// Gets the length of the grapheme cluster at the specified index of the whole text, the way the
+    /// text is segmented from its start. When the index is inside a cluster, a surrogate pair or a
+    /// single character is returned and <paramref name="isClusterStart"/> is false.
+    /// </summary>
+    private static int GetGraphemeLengthAtIndex(string text, int index, out bool isClusterStart)
+    {
         // Use StringInfo to find the grapheme at this position
         var enumerator = StringInfo.GetTextElementEnumerator(text);
         while (enumerator.MoveNext())
         {
             if (enumerator.ElementIndex == index)
             {
-                var grapheme = (string)enumerator.Current;
-                length = grapheme.Length;
-                return grapheme;
+                isClusterStart = true;
+                return enumerator.GetTextElement().Length;
             }
             if (enumerator.ElementIndex > index)
             {
@@ -748,14 +736,11 @@ public static class DisplayWidth
         }
 
         // Fallback: handle surrogate pairs
+        isClusterStart = false;
         if (char.IsHighSurrogate(text[index]) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
-        {
-            length = 2;
-            return text.Substring(index, 2);
-        }
+            return 2;
 
-        length = 1;
-        return text[index].ToString();
+        return 1;
     }
 
     /// <summary>
