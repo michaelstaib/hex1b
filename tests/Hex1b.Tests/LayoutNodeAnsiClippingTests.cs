@@ -118,6 +118,124 @@ public class LayoutNodeAnsiClippingTests
         AssertValidAnsiCsiSequences(clipped);
     }
 
+    [TestMethod]
+    public void ClipString_PlainAsciiThatFits_ReturnsTextAtSameX()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 80, 1));
+
+        var (adjustedX, clipped) = node.ClipString(2, 0, "Hello World");
+
+        Assert.AreEqual(2, adjustedX);
+        Assert.AreEqual("Hello World", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_ColouredAsciiThatFits_ReturnsTextUnchanged()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 80, 1));
+        var text = "\x1b[38;2;10;20;30mHello\x1b[0m \x1b[1mWorld\x1b[0m";
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, text);
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual(text, clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_WideCharacterSplitAtLeftEdgeWithSgr_PutsPaddingBeforeSgrPrefix()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(1, 0, 3, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b[31m中文\x1b[0m");
+
+        Assert.AreEqual(1, adjustedX);
+        Assert.AreEqual(" \x1b[31m文\x1b[0m", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_WideCharacterSplitAtRightEdgeWithSgr_PadsBeforeRestoredReset()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 2, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b[31mA中B\x1b[0m");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("\x1b[31mA \x1b[0m", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_WideCharactersSplitAtBothEdges_PadsBothSides()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(1, 0, 3, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "中AB文");
+
+        Assert.AreEqual(1, adjustedX);
+        Assert.AreEqual(" AB ", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_HyperlinkClippedOnRight_RestoresClosingSequence()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 2, 1));
+        var closer = "\x1b]8;;\x1b\\";
+        var text = "\x1b]8;;http://example.com\x1b\\link" + closer;
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, text);
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("\x1b]8;;http://example.com\x1b\\li" + closer, clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_GraphemeHeavyLine_ClipsOnClusterBoundaries()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 6, 1));
+        var family = "\U0001F468\u200D\U0001F469\u200D\U0001F467";
+        var text = $"{family} e\u0301 \U0001F1FA\U0001F1F8 tail";
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, text);
+
+        Assert.AreEqual(0, adjustedX);
+        // family (2) + space (1) + e+acute (1) + space (1) = 5; the flag (2) does not fit, so one pad column.
+        Assert.AreEqual($"{family} e\u0301  ", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_DcsSequence_IsNotRecognisedAndClippedAsText()
+    {
+        // Pins current behaviour: DCS is not skipped. The leading ESC is dropped as a zero-width
+        // grapheme, and the payload counts as visible text, so it is clipped like text.
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 4, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1bPq#0\x1b\\AB");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("Pq#0\x1b", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_ApcSequence_IsNotRecognisedAndClippedAsText()
+    {
+        // Pins current behaviour: APC is not skipped. The leading ESC is dropped as a zero-width
+        // grapheme, and the payload counts as visible text, so it is clipped like text.
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 4, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b_Gi=1\x1b\\AB");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("_Gi=", clipped);
+    }
+
     private static void AssertValidAnsiCsiSequences(string text)
     {
         for (var i = 0; i < text.Length; i++)
