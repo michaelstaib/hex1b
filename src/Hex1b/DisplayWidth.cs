@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text;
 
@@ -555,6 +556,9 @@ public static class DisplayWidth
         if (string.IsNullOrEmpty(text) || maxColumns <= 0)
             return ("", 0, 0, 0);
 
+        if (AnsiString.TryMeasurePlainAscii(text, out _))
+            return SliceAsciiWithAnsi(text, startColumn, maxColumns);
+
         // Escape sequences before the first included grapheme are the prefix; the result is empty
         // until that grapheme is reached, so one builder holds prefix and result in order.
         var result = t_sliceBuilder ??= new StringBuilder(256);
@@ -659,6 +663,69 @@ public static class DisplayWidth
     }
 
     private const int MaxCachedSliceBuilderCapacity = 4096;
+    private const int SliceStackBufferLength = 256;
+
+    /// <summary>
+    /// Slices text that is nothing but printable ASCII around complete CSI and OSC sequences
+    /// (see <see cref="AnsiString.TryMeasurePlainAscii"/>). Every visible character is one column
+    /// and a cluster of its own, so no segmentation and no padding are involved.
+    /// </summary>
+    private static (string text, int columns, int paddingBefore, int paddingAfter) SliceAsciiWithAnsi(
+        string text, int startColumn, int maxColumns)
+    {
+        char[]? rented = null;
+        Span<char> buffer = text.Length <= SliceStackBufferLength
+            ? stackalloc char[SliceStackBufferLength]
+            : (rented = ArrayPool<char>.Shared.Rent(text.Length));
+        try
+        {
+            var written = 0;
+            var currentColumn = 0;
+            var columnsUsed = 0;
+            var i = 0;
+            while (i < text.Length)
+            {
+                var c = text[i];
+                if (c == '\x1b')
+                {
+                    // Escape sequences are kept without counting columns. Before the first
+                    // included character they form the prefix, which is the same position in
+                    // the output.
+                    var sequenceEnd = text[i + 1] == '[' ? SkipCsiSequence(text, i) : SkipOscSequence(text, i);
+                    text.AsSpan(i, sequenceEnd - i).CopyTo(buffer[written..]);
+                    written += sequenceEnd - i;
+                    i = sequenceEnd;
+                    continue;
+                }
+
+                if (currentColumn < startColumn)
+                {
+                    currentColumn++;
+                    i++;
+                    continue;
+                }
+
+                if (columnsUsed == maxColumns)
+                    break;
+
+                buffer[written++] = c;
+                columnsUsed++;
+                currentColumn++;
+                i++;
+            }
+
+            if (columnsUsed == 0)
+                return ("", 0, 0, 0);
+
+            var slice = written == text.Length ? text : new string(buffer[..written]);
+            return (slice, columnsUsed, 0, 0);
+        }
+        finally
+        {
+            if (rented is not null)
+                ArrayPool<char>.Shared.Return(rented);
+        }
+    }
 
     [ThreadStatic]
     private static StringBuilder? t_sliceBuilder;
