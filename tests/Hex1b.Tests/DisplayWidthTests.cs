@@ -11,7 +11,7 @@ namespace Hex1b.Tests;
 public class DisplayWidthTests
 {
     #region ASCII Characters
-    
+
     [TestMethod]
     public void GetStringWidth_AsciiText_EqualsLength()
     {
@@ -69,7 +69,7 @@ public class DisplayWidthTests
     {
         // "Hi" (2) + 😀 (2) + "!" (1) = 5
         Assert.AreEqual(5, DisplayWidth.GetStringWidth("Hi😀!"));
-        
+
         // "A" (1) + 😀 (2) + 🇺🇸 (2) + "B" (1) = 6
         Assert.AreEqual(6, DisplayWidth.GetStringWidth("A😀🇺🇸B"));
     }
@@ -85,11 +85,11 @@ public class DisplayWidthTests
         Assert.AreEqual(2, DisplayWidth.GetStringWidth("中"));
         Assert.AreEqual(4, DisplayWidth.GetStringWidth("中文"));
         Assert.AreEqual(6, DisplayWidth.GetStringWidth("你好吗"));
-        
+
         // Japanese hiragana/katakana
         Assert.AreEqual(2, DisplayWidth.GetStringWidth("あ"));
         Assert.AreEqual(4, DisplayWidth.GetStringWidth("日本"));
-        
+
         // Korean
         Assert.AreEqual(2, DisplayWidth.GetStringWidth("한"));
         Assert.AreEqual(4, DisplayWidth.GetStringWidth("한글"));
@@ -100,7 +100,7 @@ public class DisplayWidthTests
     {
         // "Hello" (5) + "中文" (4) = 9
         Assert.AreEqual(9, DisplayWidth.GetStringWidth("Hello中文"));
-        
+
         // "A" (1) + "日" (2) + "B" (1) + "本" (2) = 6
         Assert.AreEqual(6, DisplayWidth.GetStringWidth("A日B本"));
     }
@@ -130,7 +130,7 @@ public class DisplayWidthTests
     {
         var precomposed = "é"; // Single precomposed character
         var combining = "e\u0301"; // e + combining acute
-        
+
         Assert.AreEqual(1, DisplayWidth.GetStringWidth(precomposed));
         Assert.AreEqual(1, DisplayWidth.GetStringWidth(combining));
     }
@@ -169,7 +169,7 @@ public class DisplayWidthTests
     #endregion
 
     #region Known Problematic Characters
-    
+
     /// <summary>
     /// These characters have been observed to cause alignment issues in FullAppDemo.
     /// Each should return width 2 (emoji presentation).
@@ -195,7 +195,7 @@ public class DisplayWidthTests
         var actualWidth = DisplayWidth.GetGraphemeWidth(grapheme);
         Assert.AreEqual(expectedWidth, actualWidth);
     }
-    
+
     [TestMethod]
     [DataRow("🖥️", 2)] // U+1F5A5+FE0F Desktop Computer with VS16
     [DataRow("➡️", 2)] // U+27A1+FE0F Right Arrow with VS16
@@ -626,6 +626,45 @@ public class DisplayWidthTests
         Assert.AreEqual(("\x1b[31mB", 1, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m\u0301B", 0, 80));
     }
 
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_MarksAfterCsiThatJoinOnlyInTheWholeText_AreHandledOneCharacterAtATime()
+    {
+        // Pins current behaviour: the text is segmented as a whole, so the final byte of the CSI
+        // joins the marks after it into one cluster. The slicer resumes inside that cluster and
+        // takes one character at a time: the leading U+0301 is zero width and dropped, the
+        // spacing mark U+0E33 that follows it is a visible column of its own.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m\u0301\u0E33", 0, 80);
+
+        Assert.AreEqual(("\x1b[31m\u0E33", 1, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_MarksAfterOscWithStThatJoinOnlyInTheWholeText_AreHandledOneCharacterAtATime()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b]8;;u\x1b\\\u0301\u0E33", 0, 80);
+
+        Assert.AreEqual(("\x1b]8;;u\x1b\\\u0E33", 1, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_MarksAfterOscWithBel_StartANewCluster()
+    {
+        // BEL is a control character, so the cluster starts right after it and is kept whole.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b]8;;u\x07\u0301\u0E33", 0, 80);
+
+        Assert.AreEqual(("\x1b]8;;u\x07\u0301\u0E33", 1, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ClusterAfterCsiThatStartsAtABoundary_IsKeptWhole()
+    {
+        // A cluster that begins right after the CSI is segmented normally: the base letter
+        // takes the following mark (e + U+0301 is one column, not two).
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31me\u0301\u0308X", 0, 80);
+
+        Assert.AreEqual(("\x1b[31me\u0301\u0308X", 2, 0, 0), result);
+    }
+
     #endregion
 
     #region Integration with GraphemeHelper
@@ -666,7 +705,7 @@ public class DisplayWidthTests
     }
 
     #endregion
-    
+
     [TestMethod]
     public void GetStringWidth_VariationSelectorEmoji_CalculatesCorrectly()
     {
@@ -674,22 +713,22 @@ public class DisplayWidthTests
         var text = "Test ⚠️ char";
         var expected = 12;
         var actual = DisplayWidth.GetStringWidth(text);
-        
+
         Assert.AreEqual(expected, actual);
     }
-    
+
     [TestMethod]
     public void GetGraphemeWidth_WarningEmojiWithVS16_ReturnsTwo()
     {
         // ⚠️ is U+26A0 + U+FE0F (warning + variation selector-16)
         var warning = "⚠️";
-        
+
         // Check it's actually the 2-codepoint version
         var runes = warning.EnumerateRunes().ToArray();
         Assert.AreEqual(2, runes.Length);
         Assert.AreEqual(0x26A0, runes[0].Value);  // Warning sign
         Assert.AreEqual(0xFE0F, runes[1].Value);  // Variation selector-16
-        
+
         var width = DisplayWidth.GetGraphemeWidth(warning);
         Assert.AreEqual(2, width);
     }
@@ -699,51 +738,51 @@ public class DisplayWidthTests
     {
         var emoji = "🖥️";
         var interpolated = $"Test {emoji} char";
-        
+
         // Check that the variation selector is preserved
         var runes = interpolated.EnumerateRunes().ToArray();
-        
+
         // Should contain: T,e,s,t, ,🖥,FE0F, ,c,h,a,r
         var hasVS16 = runes.Any(r => r.Value == 0xFE0F);
         Assert.IsTrue(hasVS16, "Variation selector FE0F should be preserved in interpolated string");
-        
+
         // Check width calculation
         var width = DisplayWidth.GetStringWidth(interpolated);
         // "Test " = 5, 🖥️ = 2, " char" = 5 → total = 12
         Assert.AreEqual(12, width);
     }
-    
+
     [TestMethod]
     public void SliceByDisplayWidthWithAnsi_VS16Emoji_NoPaddingWhenNotClipped()
     {
         // When slicing "Test 🖥️ char" (12 columns) with 28 columns max,
         // there should be no padding since the text fits entirely
         var text = "Test 🖥️ char";
-        var (sliced, columns, paddingBefore, paddingAfter) = 
+        var (sliced, columns, paddingBefore, paddingAfter) =
             DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 28);
-        
+
         Assert.AreEqual(text, sliced);
         Assert.AreEqual(12, columns);
         Assert.AreEqual(0, paddingBefore);
         Assert.AreEqual(0, paddingAfter);
     }
-    
+
     [TestMethod]
     public void SliceByDisplayWidthWithAnsi_InnerFillSpaces_NoPadding()
     {
         // When slicing 28 spaces with 60 columns max, there should be no padding
         var innerFill = new string(' ', 28);
-        var (sliced, columns, paddingBefore, paddingAfter) = 
+        var (sliced, columns, paddingBefore, paddingAfter) =
             DisplayWidth.SliceByDisplayWidthWithAnsi(innerFill, 0, 28);
-        
+
         Assert.AreEqual(28, sliced.Length);
         Assert.AreEqual(28, columns);
         Assert.AreEqual(0, paddingBefore);
         Assert.AreEqual(0, paddingAfter);
     }
-    
+
     #region Checkbox and Symbol Characters
-    
+
     [TestMethod]
     [DataRow("✓", 1)]  // Check Mark U+2713 - NO Emoji_Presentation, defaults to text
     [DataRow("✔", 1)]  // Heavy Check Mark U+2714 - Emoji=Yes but Emoji_Presentation=No (needs VS16 for wide)
@@ -756,7 +795,7 @@ public class DisplayWidthTests
         var actualWidth = DisplayWidth.GetGraphemeWidth(symbol);
         Assert.AreEqual(expectedWidth, actualWidth);
     }
-    
+
     [TestMethod]
     public void GetStringWidth_CheckmarkLine_CalculatesCorrectly()
     {
@@ -766,18 +805,18 @@ public class DisplayWidthTests
         var width = DisplayWidth.GetStringWidth(line);
         Assert.AreEqual(19, width);
     }
-    
+
     [TestMethod]
     public void GetStringWidth_ClipboardEmoji_CalculatesCorrectly()
     {
         // 📋 is a wide emoji (2 columns)
         var clipboard = "📋";
         Assert.AreEqual(2, DisplayWidth.GetGraphemeWidth(clipboard));
-        
+
         // "  📋 Pending Tasks" = 2 spaces + 📋 (2) + space (1) + "Pending Tasks" (13) = 18
         var line = "  📋 Pending Tasks";
         Assert.AreEqual(18, DisplayWidth.GetStringWidth(line));
     }
-    
+
     #endregion
 }
