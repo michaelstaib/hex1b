@@ -665,6 +665,49 @@ public class DisplayWidthTests
         Assert.AreEqual(("\x1b[31me\u0301\u0308X", 2, 0, 0), result);
     }
 
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_LongPlainAscii_SlicesColumnsAndKeepsSequences()
+    {
+        var body = string.Concat(Enumerable.Range(0, 600).Select(n => (char)('a' + n % 26)));
+        var text = "\x1b[31m" + body + "\x1b[0m";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 10, 500);
+
+        Assert.AreEqual(("\x1b[31m" + body.Substring(10, 500), 500, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_LongPlainAsciiThatFits_ReturnsInputUnchanged()
+    {
+        var text = "\x1b[31m" + new string('x', 600) + "\x1b[0m";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 1000);
+
+        Assert.AreEqual((text, 600, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_LongWideText_SlicesWithPaddingAtBothEdges()
+    {
+        var text = "\x1b[31m" + string.Concat(Enumerable.Repeat("\u4E2D", 3000)) + "\x1b[0m";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 1, 5001);
+
+        Assert.AreEqual(("\x1b[31m" + string.Concat(Enumerable.Repeat("\u4E2D", 2500)), 5000, 1, 1), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_SlicedAfterAnotherLongSlice_DoesNotLeakEarlierOutput()
+    {
+        // The slicer reuses a per-thread builder; a long slice followed by a short one must not
+        // show any of the earlier content.
+        _ = DisplayWidth.SliceByDisplayWidthWithAnsi(string.Concat(Enumerable.Repeat("\u4E2D", 6000)), 0, 12000);
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\u4E2DAB", 0, 80);
+
+        Assert.AreEqual(("\u4E2DAB", 4, 0, 0), result);
+    }
+
     #endregion
 
     #region Integration with GraphemeHelper
