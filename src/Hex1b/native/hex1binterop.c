@@ -352,7 +352,11 @@ int hex1b_termios_set(int fd, const void* buffer, size_t capacity)
     }
     struct termios attributes;
     memcpy(&attributes, buffer, sizeof(attributes));
-    return tcsetattr(fd, TCSAFLUSH, &attributes);
+    // TCSANOW, not TCSAFLUSH: TCSAFLUSH discards input that has been typed but not read,
+    // which would drop keys typed while an application starts or while one console
+    // lifetime hands the terminal to the next. This applies to entering raw mode and to
+    // restoring the original settings alike.
+    return tcsetattr(fd, TCSANOW, &attributes);
 }
 
 int hex1b_get_window_pixel_size(int fd, int* pixel_width, int* pixel_height)
