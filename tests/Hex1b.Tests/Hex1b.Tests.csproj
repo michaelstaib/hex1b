@@ -19,6 +19,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Hex1b\Hex1b.csproj" />
+    <!-- Child process of TypedAheadInputTests; built next to this project, never referenced. -->
+    <ProjectReference Include="..\Hex1b.TypedAheadHost\Hex1b.TypedAheadHost.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>TypedAheadHostPath</_Parameter1>
+      <_Parameter2>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', 'Hex1b.TypedAheadHost', 'bin', '$(Configuration)', '$(TargetFramework)', 'Hex1b.TypedAheadHost.dll'))</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>
