@@ -55,6 +55,7 @@ public sealed class ConsolePresentationAdapter :
     private byte[] _prefetchedInput = [];
     private Encoding? _inputEncoding;
     private Decoder? _inputDecoder;
+    private Task _probeTask = Task.CompletedTask;
     private bool _kgpProbeCompleted;
     private bool _backgroundProbeCompleted;
     private bool _reflowEnabled;
@@ -311,6 +312,11 @@ public sealed class ConsolePresentationAdapter :
         
         try
         {
+            // The capability probe reads stdin while it runs. Reading here as well would
+            // split the typed-ahead bytes between two readers, and the ones the probe
+            // keeps are only handed on after it finishes, so wait for it first.
+            await WaitForProbeAsync(linkedCts.Token);
+
             if (_prefetchedInput.Length > 0)
             {
                 var prefetched = _prefetchedInput;
@@ -399,6 +405,25 @@ public sealed class ConsolePresentationAdapter :
         return ValueTask.CompletedTask;
     }
 
+    private async ValueTask WaitForProbeAsync(CancellationToken ct)
+    {
+        var probe = _probeTask;
+        if (probe.IsCompleted)
+        {
+            return;
+        }
+
+        try
+        {
+            await probe.WaitAsync(ct);
+        }
+        catch (Exception)
+        {
+            // The probe reports its own failures to whoever awaits EnterRawModeAsync, and
+            // cancellation is handled by the read loop; here only its completion matters.
+        }
+    }
+
     /// <inheritdoc />
     public ValueTask EnterRawModeAsync(CancellationToken ct = default)
     {
@@ -409,7 +434,9 @@ public sealed class ConsolePresentationAdapter :
         // No escape sequences - screen mode is controlled by the workload
         _driver.EnterRawMode(_preserveOPost);
 
-        return ProbeCapabilitiesAsync(ct);
+        var probe = ProbeCapabilitiesAsync(ct).AsTask();
+        _probeTask = probe;
+        return new ValueTask(probe);
     }
 
     /// <inheritdoc />

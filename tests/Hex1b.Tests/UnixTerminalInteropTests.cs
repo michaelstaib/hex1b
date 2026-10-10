@@ -88,7 +88,7 @@ public class UnixTerminalInteropTests
         Assert.AreEqual(0, UnixTerminalInterop.SetTermios(pty.Slave, original));
         var restored = new byte[original.Length];
         Assert.AreEqual(0, UnixTerminalInterop.GetTermios(pty.Slave, restored));
-        TestSeq.AreEqual(original, restored);
+        TestSeq.AreEqual(WithoutPendingInputFlag(original), WithoutPendingInputFlag(restored));
     }
 
     [TestMethod]
@@ -109,6 +109,23 @@ public class UnixTerminalInteropTests
         Assert.AreNotEqual(0, error);
         Assert.AreEqual(0, width);
         Assert.AreEqual(0, height);
+    }
+
+    // Restoring canonical mode without TCSAFLUSH leaves macOS' PENDIN local flag set: the kernel
+    // sets it when ICANON turns on so that input typed ahead in raw mode is line-processed
+    // on the next read, and only a flush would clear it. It is not a setting we restore.
+    private static byte[] WithoutPendingInputFlag(byte[] termios)
+    {
+        var result = (byte[])termios.Clone();
+        if (OperatingSystem.IsMacOS())
+        {
+            const int localFlagsOffset = 3 * sizeof(ulong);
+            const ulong pendingInput = 0x20000000;
+            var localFlags = BitConverter.ToUInt64(result, localFlagsOffset) & ~pendingInput;
+            BitConverter.GetBytes(localFlags).CopyTo(result, localFlagsOffset);
+        }
+
+        return result;
     }
 
     private static byte[] ReadExactly(int fd, int count)
