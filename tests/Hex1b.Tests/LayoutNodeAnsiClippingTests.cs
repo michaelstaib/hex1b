@@ -235,29 +235,29 @@ public class LayoutNodeAnsiClippingTests
     [TestMethod]
     public void ClipString_DcsSequence_IsNotRecognisedAndClippedAsText()
     {
-        // Pins current behaviour: DCS is not skipped. The leading ESC is dropped as a zero-width
-        // grapheme, and the payload counts as visible text, so it is clipped like text.
+        // Pins current behaviour: DCS is not skipped. The ESCs are zero-width graphemes, and the
+        // payload counts as visible text, so it is clipped like text.
         var node = new LayoutNode();
         node.Arrange(new Rect(0, 0, 4, 1));
 
         var (adjustedX, clipped) = node.ClipString(0, 0, "\x1bPq#0\x1b\\AB");
 
         Assert.AreEqual(0, adjustedX);
-        Assert.AreEqual("Pq#0\x1b", clipped);
+        Assert.AreEqual("\x1bPq#0\x1b", clipped);
     }
 
     [TestMethod]
     public void ClipString_ApcSequence_IsNotRecognisedAndClippedAsText()
     {
-        // Pins current behaviour: APC is not skipped. The leading ESC is dropped as a zero-width
-        // grapheme, and the payload counts as visible text, so it is clipped like text.
+        // Pins current behaviour: APC is not skipped. The ESCs are zero-width graphemes, and the
+        // payload counts as visible text, so it is clipped like text.
         var node = new LayoutNode();
         node.Arrange(new Rect(0, 0, 4, 1));
 
         var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b_Gi=1\x1b\\AB");
 
         Assert.AreEqual(0, adjustedX);
-        Assert.AreEqual("_Gi=", clipped);
+        Assert.AreEqual("\x1b_Gi=", clipped);
     }
 
     [TestMethod]

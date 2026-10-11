@@ -387,44 +387,52 @@ public class DisplayWidthTests
     public void SliceByDisplayWidthWithAnsi_DcsSequence_IsNotRecognisedAndCountsAsText()
     {
         // Pins current behaviour: only CSI and OSC are parsed. DCS (ESC P ... ST) is not skipped:
-        // the leading ESC is a zero-width grapheme and is dropped, while the payload letters count
-        // as 7 visible columns and the ESC inside the sequence is kept.
+        // the ESCs are zero-width graphemes and are kept, while the payload letters count
+        // as 7 visible columns.
         var text = "\x1bPq#0\x1b\\AB";
 
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
 
-        Assert.AreEqual(("Pq#0\x1b\\AB", 7, 0, 0), result);
+        Assert.AreEqual((text, 7, 0, 0), result);
     }
 
     [TestMethod]
     public void SliceByDisplayWidthWithAnsi_ApcSequence_IsNotRecognisedAndCountsAsText()
     {
         // Pins current behaviour: only CSI and OSC are parsed. APC (ESC _ ... ST) is not skipped:
-        // the leading ESC is a zero-width grapheme and is dropped, while the payload letters count
-        // as 8 visible columns and the ESC inside the sequence is kept.
+        // the ESCs are zero-width graphemes and are kept, while the payload letters count
+        // as 8 visible columns.
         var text = "\x1b_Gi=1\x1b\\AB";
 
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
 
-        Assert.AreEqual(("_Gi=1\x1b\\AB", 8, 0, 0), result);
+        Assert.AreEqual((text, 8, 0, 0), result);
     }
 
     [TestMethod]
-    public void SliceByDisplayWidthWithAnsi_LeadingZeroWidthGrapheme_IsDropped()
+    public void SliceByDisplayWidthWithAnsi_LeadingZeroWidthGrapheme_IsKeptWhenSliceStartsAtColumnZero()
     {
-        // Pins current behaviour: a zero-width grapheme at the start is skipped (it fits in
-        // the columns before startColumn) and never reaches the output.
+        // Nothing precedes a slice that starts at column 0, so the zero-width grapheme belongs to it.
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\u0301AB", 0, 5);
 
-        Assert.AreEqual(("AB", 2, 0, 0), result);
+        Assert.AreEqual(("\u0301AB", 2, 0, 0), result);
     }
 
     [TestMethod]
-    public void SliceByDisplayWidthWithAnsi_LeadingZeroWidthGraphemeAfterSgr_IsDroppedButSgrKept()
+    public void SliceByDisplayWidthWithAnsi_ZeroWidthGraphemeAtStartColumn_IsDroppedWithTheClippedText()
+    {
+        // A zero-width grapheme at the start column follows the cell that is clipped away.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("AB\x1b[31m\u0301C", 2, 5);
+
+        Assert.AreEqual(("\x1b[31mC", 1, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_LeadingZeroWidthGraphemeAfterSgr_IsKeptAfterTheSgr()
     {
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m\u0301AB", 0, 5);
 
-        Assert.AreEqual(("\x1b[31mAB", 2, 0, 0), result);
+        Assert.AreEqual(("\x1b[31m\u0301AB", 2, 0, 0), result);
     }
 
     [TestMethod]
@@ -620,10 +628,9 @@ public class DisplayWidthTests
     [TestMethod]
     public void SliceByDisplayWidthWithAnsi_CombiningMarkAfterCsi_IsKeptAsSeparateGrapheme()
     {
-        // Pins current behaviour: the mark after a CSI is zero width. It is kept once output has
-        // started, and dropped when it is the first thing in the line.
+        // The mark after a CSI is zero width and kept, also when it is the first thing in the line.
         Assert.AreEqual(("A\x1b[31m\u0301B", 2, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("A\x1b[31m\u0301B", 0, 80));
-        Assert.AreEqual(("\x1b[31mB", 1, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m\u0301B", 0, 80));
+        Assert.AreEqual(("\x1b[31m\u0301B", 1, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m\u0301B", 0, 80));
     }
 
     [TestMethod]
@@ -631,11 +638,11 @@ public class DisplayWidthTests
     {
         // Pins current behaviour: the text is segmented as a whole, so the final byte of the CSI
         // joins the marks after it into one cluster. The slicer resumes inside that cluster and
-        // takes one character at a time: the leading U+0301 is zero width and dropped, the
+        // takes one character at a time: the leading U+0301 is zero width and kept, the
         // spacing mark U+0E33 that follows it is a visible column of its own.
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m\u0301\u0E33", 0, 80);
 
-        Assert.AreEqual(("\x1b[31m\u0E33", 1, 0, 0), result);
+        Assert.AreEqual(("\x1b[31m\u0301\u0E33", 1, 0, 0), result);
     }
 
     [TestMethod]
@@ -643,7 +650,7 @@ public class DisplayWidthTests
     {
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b]8;;u\x1b\\\u0301\u0E33", 0, 80);
 
-        Assert.AreEqual(("\x1b]8;;u\x1b\\\u0E33", 1, 0, 0), result);
+        Assert.AreEqual(("\x1b]8;;u\x1b\\\u0301\u0E33", 1, 0, 0), result);
     }
 
     [TestMethod]

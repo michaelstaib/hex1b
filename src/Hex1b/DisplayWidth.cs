@@ -616,8 +616,9 @@ public static class DisplayWidth
                 graphemeWidth = GetGraphemeWidth(text.AsSpan(i, graphemeLength));
             }
 
-            // Skip graphemes before start column
-            if (currentColumn + graphemeWidth <= startColumn)
+            // Skip graphemes before start column. Nothing precedes a slice that starts at column 0,
+            // so a zero-width grapheme at the start of the text is part of the slice.
+            if (startColumn > 0 && currentColumn + graphemeWidth <= startColumn)
             {
                 currentColumn += graphemeWidth;
                 i += graphemeLength;
