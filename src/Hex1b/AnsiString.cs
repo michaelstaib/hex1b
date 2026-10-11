@@ -13,9 +13,9 @@ internal static class AnsiString
     }
 
     /// <summary>
-    /// Measures the display width of the text outside CSI, OSC, DCS and APC sequences. Reports through
-    /// <paramref name="isPlainAscii"/> whether the visible part is nothing but printable ASCII
-    /// (0x20-0x7E) with only complete CSI or OSC sequences around it.
+    /// Measures the display width of the text outside CSI, OSC, DCS and APC sequences. Reports
+    /// through <paramref name="isPlainAscii"/> whether the visible part is nothing but printable
+    /// ASCII (0x20-0x7E) with only complete sequences of those kinds around it.
     /// </summary>
     internal static int MeasureVisible(string text, out bool isPlainAscii)
     {
@@ -37,8 +37,8 @@ internal static class AnsiString
 
     /// <summary>
     /// Counts the columns of text that consists only of printable ASCII outside complete CSI, OSC,
-    /// DCS or APC sequences. Returns false at the first other character, including an escape that does
-    /// not start a complete sequence.
+    /// DCS or APC sequences. Returns false at the first other character, including an escape that
+    /// does not start a complete sequence.
     /// </summary>
     internal static bool TryMeasurePlainAscii(string text, out int width)
     {
@@ -90,8 +90,8 @@ internal static class AnsiString
     }
 
     /// <summary>
-    /// Copies the text without CSI, OSC, DCS and APC sequences into <paramref name="destination"/>, which
-    /// must be at least as long as the text, and returns the number of characters written.
+    /// Copies the text without CSI, OSC, DCS and APC sequences into <paramref name="destination"/>,
+    /// which must be at least as long as the text, and returns the number of characters written.
     /// </summary>
     private static int StripAnsiCodes(string text, Span<char> destination)
     {
