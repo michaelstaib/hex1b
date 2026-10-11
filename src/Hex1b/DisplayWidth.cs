@@ -681,7 +681,7 @@ public static class DisplayWidth
         // end the text are still ahead when the text was clipped. They close what the slice opened.
         if (clippedOnRight)
         {
-            var suffixStart = AnsiString.TrailingEscapeSuffixStart(text);
+            var suffixStart = AnsiString.TrailingEscapeSuffixStart(text, i);
 
             // Sequences just before the cut can already be the same ones. With padding after the
             // slice they are not at its end, so they are restored.
@@ -770,7 +770,7 @@ public static class DisplayWidth
             // buffer: it holds the text, of which the slice and these sequences are disjoint parts.
             if (clippedOnRight)
             {
-                var suffixStart = AnsiString.TrailingEscapeSuffixStart(text);
+                var suffixStart = AnsiString.TrailingEscapeSuffixStart(text, i);
                 var suffix = text.AsSpan(suffixStart);
                 if (!suffix.IsEmpty && !buffer[..written].EndsWith(suffix))
                 {

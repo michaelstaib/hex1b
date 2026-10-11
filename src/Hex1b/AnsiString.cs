@@ -276,16 +276,18 @@ internal static class AnsiString
     /// <summary>
     /// Returns the index where the run of complete CSI, OSC, DCS and APC sequences at the end of the
     /// text starts, which is typically a reset or a hyperlink closer, or the length of the text when
-    /// it does not end in such a run.
+    /// it does not end in such a run. <paramref name="startIndex"/> must be the start of a sequence
+    /// or of a character, and the text from there on must contain a printable character; the text
+    /// before it is not looked at.
     /// </summary>
-    internal static int TrailingEscapeSuffixStart(string text)
+    internal static int TrailingEscapeSuffixStart(string text, int startIndex)
     {
         if (string.IsNullOrEmpty(text))
             return 0;
 
         // Find the end index of the last printable character.
-        var lastPrintableEnd = 0;
-        for (var i = 0; i < text.Length;)
+        var lastPrintableEnd = startIndex;
+        for (var i = startIndex; i < text.Length;)
         {
             if (TryReadCsi(text, i, out var nextIndex))
             {
