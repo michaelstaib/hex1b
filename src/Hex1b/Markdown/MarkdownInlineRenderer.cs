@@ -384,7 +384,7 @@ internal static class MarkdownInlineRenderer
 
                 // Build ANSI string for the word, then slice by display width
                 var ansiWord = RenderFragmentsToAnsi(word.Fragments, focusedLinkId);
-                var remaining = ansiWord;
+                var placedColumns = 0;
                 var remainingWidth = wordWidth;
                 lineWidth = LineWidth();
 
@@ -408,8 +408,7 @@ internal static class MarkdownInlineRenderer
                         lineWidth = LineWidth();
                         sliceWidth = lineWidth;
                     }
-                    var (chunk, cols, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(
-                        remaining, 0, sliceWidth, restoreClosers: true, out _, out var consumed);
+                    var (chunk, cols, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(ansiWord, placedColumns, sliceWidth);
                     if (lineFragments.Count > 0)
                     {
                         var prefix = RenderFragmentsToAnsi(lineFragments, focusedLinkId, c);
@@ -420,7 +419,7 @@ internal static class MarkdownInlineRenderer
                         lines.Add(chunk);
                     }
                     lineFragments = [];
-                    remaining = remaining[consumed..];
+                    placedColumns += cols;
                     remainingWidth -= cols;
                     lineIndex++;
                     if (hangingIndent > 0)
@@ -435,6 +434,9 @@ internal static class MarkdownInlineRenderer
                     lineWidth = LineWidth();
                 }
 
+                var remaining = placedColumns == 0
+                    ? ansiWord
+                    : DisplayWidth.SliceByDisplayWidthWithAnsi(ansiWord, placedColumns, int.MaxValue).text;
                 if (remaining.Length > 0)
                 {
                     lineFragments.Add(new MarkdownTextRun(remaining, null, null, CellAttributes.None));
@@ -461,18 +463,17 @@ internal static class MarkdownInlineRenderer
 
                     // Character-break: fill remaining space on current line
                     var ansiWord = RenderFragmentsToAnsi(word.Fragments, focusedLinkId);
-                    var remaining = ansiWord;
+                    var placedColumns = 0;
                     var remainingWidth = wordWidth;
 
                     var sliceWidth = lineWidth - currentX;
                     if (sliceWidth > 0)
                     {
-                        var (chunk, cols, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(
-                            remaining, 0, sliceWidth, restoreClosers: true, out _, out var consumed);
+                        var (chunk, cols, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(ansiWord, placedColumns, sliceWidth);
                         var prefix = RenderFragmentsToAnsi(lineFragments, focusedLinkId, c);
                         lines.Add(prefix + chunk);
                         lineFragments = [];
-                        remaining = remaining[consumed..];
+                        placedColumns += cols;
                         remainingWidth -= cols;
                         lineIndex++;
                     }
@@ -481,15 +482,17 @@ internal static class MarkdownInlineRenderer
                     var contWidth = Math.Max(1, maxWidth - hangingIndent);
                     while (remainingWidth > contWidth)
                     {
-                        var (chunk2, cols2, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(
-                            remaining, 0, contWidth, restoreClosers: true, out _, out var consumed2);
+                        var (chunk2, cols2, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(ansiWord, placedColumns, contWidth);
                         lines.Add(IndentText() + chunk2);
-                        remaining = remaining[consumed2..];
+                        placedColumns += cols2;
                         remainingWidth -= cols2;
                         lineIndex++;
                     }
 
                     // Last piece goes into the current line fragments
+                    var remaining = placedColumns == 0
+                        ? ansiWord
+                        : DisplayWidth.SliceByDisplayWidthWithAnsi(ansiWord, placedColumns, int.MaxValue).text;
                     if (remaining.Length > 0)
                     {
                         lineFragments.Add(new MarkdownTextRun(IndentText(), null, null, CellAttributes.None));

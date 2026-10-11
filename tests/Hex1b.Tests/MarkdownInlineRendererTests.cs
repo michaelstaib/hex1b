@@ -397,6 +397,64 @@ public class MarkdownInlineRendererTests
     }
 
     [TestMethod]
+    public void WrapLines_OversizedLinkedWord_KeepsTheLinkAndStyleOnEveryLine()
+    {
+        var words = new List<StyledWord>
+        {
+            new([new MarkdownTextRun("abcdefghij", null, null, CellAttributes.Bold, "http://example.com")], 10, false)
+        };
+
+        var lines = MarkdownInlineRenderer.WrapLines(words, 4);
+
+        Assert.AreEqual(3, lines.Count);
+        var expectedText = new[] { "abcd", "efgh", "ij" };
+        for (var y = 0; y < lines.Count; y++)
+        {
+            // Each line is rendered on its own, so it cannot inherit anything from the line before.
+            var surface = new Hex1b.Surfaces.Surface(6, 1);
+            var context = new Hex1b.Surfaces.SurfaceRenderContext(surface);
+            context.WriteClipped(0, 0, lines[y]);
+            for (var x = 0; x < expectedText[y].Length; x++)
+            {
+                var cell = surface[x, 0];
+                Assert.AreEqual(expectedText[y][x].ToString(), cell.Character);
+                Assert.IsTrue(cell.Attributes.HasFlag(CellAttributes.Bold), $"Line {y}, column {x} is not bold: {lines[y]}");
+                Assert.IsNotNull(cell.Hyperlink, $"Line {y}, column {x} has no hyperlink: {lines[y]}");
+            }
+        }
+    }
+
+    [TestMethod]
+    public void WrapLines_OversizedWordWithTwoStyles_KeepsEachStyleOnItsOwnPart()
+    {
+        var words = new List<StyledWord>
+        {
+            new([
+                new MarkdownTextRun("abcdef", null, null, CellAttributes.Bold),
+                new MarkdownTextRun("ghijkl", null, null, CellAttributes.Italic)], 12, false)
+        };
+
+        var lines = MarkdownInlineRenderer.WrapLines(words, 4);
+
+        Assert.AreEqual(3, lines.Count);
+        var all = "abcdefghijkl";
+        for (var y = 0; y < lines.Count; y++)
+        {
+            var surface = new Hex1b.Surfaces.Surface(6, 1);
+            var context = new Hex1b.Surfaces.SurfaceRenderContext(surface);
+            context.WriteClipped(0, 0, lines[y]);
+            for (var x = 0; x < 4; x++)
+            {
+                var index = y * 4 + x;
+                var cell = surface[x, 0];
+                Assert.AreEqual(all[index].ToString(), cell.Character);
+                Assert.AreEqual(index < 6, cell.Attributes.HasFlag(CellAttributes.Bold), $"bold at {index}: {lines[y]}");
+                Assert.AreEqual(index >= 6, cell.Attributes.HasFlag(CellAttributes.Italic), $"italic at {index}: {lines[y]}");
+            }
+        }
+    }
+
+    [TestMethod]
     public void WrapLines_BoldText_ContainsAnsiCodes()
     {
         var words = new List<StyledWord>
