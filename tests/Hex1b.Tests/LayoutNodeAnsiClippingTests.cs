@@ -70,6 +70,30 @@ public class LayoutNodeAnsiClippingTests
     }
 
     [TestMethod]
+    public void ClipString_WideCharacterWithOnlyOneColumnAvailable_ReturnsPaddingForThatColumn()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 1, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "中");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual(" ", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_WideCharacterWithOnlyOneColumnAvailableAndSgr_PadsAndRestoresReset()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 1, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b[31m中\x1b[0m");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual(" \x1b[0m", clipped);
+    }
+
+    [TestMethod]
     public void ClipString_WideCharacterClippedOnLeft_AddsPadding()
     {
         var node = new LayoutNode();

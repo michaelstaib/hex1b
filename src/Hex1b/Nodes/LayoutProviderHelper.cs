@@ -92,7 +92,7 @@ public static class LayoutProviderHelper
         var (slicedText, _, paddingBefore, paddingAfter) =
             DisplayWidth.SliceByDisplayWidthWithAnsi(text, startColumn, sliceLength);
 
-        if (slicedText.Length == 0 && paddingBefore == 0)
+        if (slicedText.Length == 0 && paddingBefore == 0 && paddingAfter == 0)
             return (x, "");
 
         // Build the result with padding if needed
