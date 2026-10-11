@@ -333,22 +333,74 @@ public class DisplayWidthTests
     }
 
     [TestMethod]
-    public void SliceByDisplayWidthWithAnsi_ClippedOnRight_KeepsOnlyImmediatelyTrailingCsi()
+    public void SliceByDisplayWidthWithAnsi_ClippedOnRight_DoesNotRepeatAResetThatEndsTheSlice()
     {
-        // Pins current behaviour: only escape sequences directly after the last included
-        // grapheme are kept; a reset that follows dropped text is lost.
+        // The slice already ends in the same reset the text ends in, so it is not added again.
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31mABC\x1b[0mDE\x1b[0m", 0, 3);
 
         Assert.AreEqual(("\x1b[31mABC\x1b[0m", 3, 0, 0), result);
     }
 
     [TestMethod]
-    public void SliceByDisplayWidthWithAnsi_ClippedBeforeTrailingReset_DropsReset()
+    public void SliceByDisplayWidthWithAnsi_ClippedBeforeTrailingReset_RestoresReset()
     {
-        // Pins current behaviour: the reset after the dropped text is not kept by the slicer.
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31mABCDE\x1b[0m", 0, 3);
 
-        Assert.AreEqual(("\x1b[31mABC", 3, 0, 0), result);
+        Assert.AreEqual(("\x1b[31mABC\x1b[0m", 3, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ClippedBeforeDifferentSequenceAndTrailingReset_AppendsTheReset()
+    {
+        // The SGR after the last included character is kept in place; the final reset is restored.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31mAB\x1b[32mCD\x1b[0m", 0, 2);
+
+        Assert.AreEqual(("\x1b[31mAB\x1b[32m\x1b[0m", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ClippedBeforeHyperlinkCloserAndReset_RestoresBothInOrder()
+    {
+        var text = "\x1b[31m\x1b]8;;http://example.com\x1b\\link\x1b]8;;\x1b\\\x1b[0m";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 2);
+
+        Assert.AreEqual(("\x1b[31m\x1b]8;;http://example.com\x1b\\li\x1b]8;;\x1b\\\x1b[0m", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ClippedBeforeTrailingResetWithStartColumn_RestoresReset()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31mABCDE\x1b[0m", 1, 2);
+
+        Assert.AreEqual(("\x1b[31mBC\x1b[0m", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ClippedBeforeTrailingResetOnNonAsciiText_RestoresReset()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m中文字\x1b[0m", 0, 4);
+
+        Assert.AreEqual(("\x1b[31m中文\x1b[0m", 4, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_NothingIncludedBeforeTrailingReset_RestoresNothing()
+    {
+        // The wide character does not fit, so no style was opened in the slice and no reset is needed.
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("\x1b[31m中\x1b[0m", 0, 1);
+
+        Assert.AreEqual(("", 0, 0, 1), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_TextThatFits_RestoresNothingBecauseNothingIsClipped()
+    {
+        var text = "\x1b[31mABC\x1b[0m";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 3);
+
+        Assert.AreEqual((text, 3, 0, 0), result);
     }
 
     [TestMethod]
@@ -372,15 +424,13 @@ public class DisplayWidthTests
     }
 
     [TestMethod]
-    public void SliceByDisplayWidthWithAnsi_OscHyperlinkClippedOnRight_DropsClosingSequence()
+    public void SliceByDisplayWidthWithAnsi_OscHyperlinkClippedOnRight_RestoresClosingSequence()
     {
-        // Pins current behaviour: the OSC 8 opener is kept but the closer after the
-        // dropped text is not, so the slicer alone leaves the hyperlink open.
         var text = "\x1b]8;;http://example.com\x1b\\link\x1b]8;;\x1b\\";
 
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 2);
 
-        Assert.AreEqual(("\x1b]8;;http://example.com\x1b\\li", 2, 0, 0), result);
+        Assert.AreEqual(("\x1b]8;;http://example.com\x1b\\li\x1b]8;;\x1b\\", 2, 0, 0), result);
     }
 
     [TestMethod]
@@ -680,7 +730,7 @@ public class DisplayWidthTests
 
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 10, 500);
 
-        Assert.AreEqual(("\x1b[31m" + body.Substring(10, 500), 500, 0, 0), result);
+        Assert.AreEqual(("\x1b[31m" + body.Substring(10, 500) + "\x1b[0m", 500, 0, 0), result);
     }
 
     [TestMethod]
@@ -700,7 +750,7 @@ public class DisplayWidthTests
 
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 1, 5001);
 
-        Assert.AreEqual(("\x1b[31m" + string.Concat(Enumerable.Repeat("\u4E2D", 2500)), 5000, 1, 1), result);
+        Assert.AreEqual(("\x1b[31m" + string.Concat(Enumerable.Repeat("\u4E2D", 2500)) + "\x1b[0m", 5000, 1, 1), result);
     }
 
     [TestMethod]

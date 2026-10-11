@@ -373,6 +373,30 @@ public class MarkdownInlineRendererTests
     }
 
     [TestMethod]
+    public void WrapLines_OversizedLinkedWord_ClosesTheLinkAndStyleOnEveryLineWithoutLosingText()
+    {
+        var closers = "\x1b]8;;\x1b\\\x1b[0m";
+        var words = new List<StyledWord>
+        {
+            new([new MarkdownTextRun("abcdefghij", null, null, CellAttributes.Bold, "http://example.com")], 10, false)
+        };
+
+        var lines = MarkdownInlineRenderer.WrapLines(words, 4);
+
+        // Every broken line ends with the closers, so neither the link nor the style stays open,
+        // and the closers appear once per line.
+        Assert.AreEqual(3, lines.Count);
+        foreach (var line in lines)
+        {
+            Assert.IsTrue(line.EndsWith(closers, StringComparison.Ordinal), $"Line does not end with the closers: {line}");
+            Assert.AreEqual(1, line.Split(closers).Length - 1, $"Closers are not emitted exactly once: {line}");
+        }
+
+        var visible = string.Concat(lines.Select(l => System.Text.RegularExpressions.Regex.Replace(l, "\x1b\\[[0-9;]*m|\x1b\\]8;;[^\x1b]*\x1b\\\\", "")));
+        Assert.AreEqual("abcdefghij", visible);
+    }
+
+    [TestMethod]
     public void WrapLines_BoldText_ContainsAnsiCodes()
     {
         var words = new List<StyledWord>

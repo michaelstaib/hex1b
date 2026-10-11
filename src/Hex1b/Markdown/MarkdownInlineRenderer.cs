@@ -408,7 +408,8 @@ internal static class MarkdownInlineRenderer
                         lineWidth = LineWidth();
                         sliceWidth = lineWidth;
                     }
-                    var (chunk, cols, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(remaining, 0, sliceWidth);
+                    var (chunk, cols, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(
+                        remaining, 0, sliceWidth, restoreClosers: true, out _, out var consumed);
                     if (lineFragments.Count > 0)
                     {
                         var prefix = RenderFragmentsToAnsi(lineFragments, focusedLinkId, c);
@@ -419,7 +420,7 @@ internal static class MarkdownInlineRenderer
                         lines.Add(chunk);
                     }
                     lineFragments = [];
-                    remaining = remaining[chunk.Length..];
+                    remaining = remaining[consumed..];
                     remainingWidth -= cols;
                     lineIndex++;
                     if (hangingIndent > 0)
@@ -466,11 +467,12 @@ internal static class MarkdownInlineRenderer
                     var sliceWidth = lineWidth - currentX;
                     if (sliceWidth > 0)
                     {
-                        var (chunk, cols, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(remaining, 0, sliceWidth);
+                        var (chunk, cols, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(
+                            remaining, 0, sliceWidth, restoreClosers: true, out _, out var consumed);
                         var prefix = RenderFragmentsToAnsi(lineFragments, focusedLinkId, c);
                         lines.Add(prefix + chunk);
                         lineFragments = [];
-                        remaining = remaining[chunk.Length..];
+                        remaining = remaining[consumed..];
                         remainingWidth -= cols;
                         lineIndex++;
                     }
@@ -479,9 +481,10 @@ internal static class MarkdownInlineRenderer
                     var contWidth = Math.Max(1, maxWidth - hangingIndent);
                     while (remainingWidth > contWidth)
                     {
-                        var (chunk2, cols2, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(remaining, 0, contWidth);
+                        var (chunk2, cols2, _, _) = DisplayWidth.SliceByDisplayWidthWithAnsi(
+                            remaining, 0, contWidth, restoreClosers: true, out _, out var consumed2);
                         lines.Add(IndentText() + chunk2);
-                        remaining = remaining[chunk2.Length..];
+                        remaining = remaining[consumed2..];
                         remainingWidth -= cols2;
                         lineIndex++;
                     }

@@ -548,16 +548,36 @@ public static class DisplayWidth
     /// <param name="maxColumns">Maximum number of columns to include.</param>
     /// <returns>
     /// A tuple of (slicedText, columnsUsed, paddingBefore, paddingAfter).
-    /// The sliced text includes any ANSI codes that precede included characters.
+    /// The sliced text includes any ANSI codes that precede included characters. When the end of the
+    /// text is clipped away, the escape sequences that end the text (typically a reset or a
+    /// hyperlink closer) are appended so no style or link stays open.
     /// </returns>
     public static (string text, int columns, int paddingBefore, int paddingAfter) SliceByDisplayWidthWithAnsi(
         string text, int startColumn, int maxColumns)
     {
+        return SliceByDisplayWidthWithAnsi(text, startColumn, maxColumns, restoreClosers: true, out _, out _);
+    }
+
+    /// <summary>
+    /// Slices like <see cref="SliceByDisplayWidthWithAnsi(string, int, int)"/> and reports where the
+    /// slice ends. When the end of the text is clipped away, <paramref name="restoredFrom"/> is the
+    /// index in <paramref name="text"/> where the sequences that end the text start, or -1 when
+    /// there is nothing to restore. They are appended to the returned text when
+    /// <paramref name="restoreClosers"/> is set and something was included; a caller that pads the
+    /// slice leaves it unset and appends them after the padding itself. <paramref name="sliceEnd"/>
+    /// is the index just past the part of the text that the slice consumed, 0 when nothing was
+    /// included.
+    /// </summary>
+    internal static (string text, int columns, int paddingBefore, int paddingAfter) SliceByDisplayWidthWithAnsi(
+        string text, int startColumn, int maxColumns, bool restoreClosers, out int restoredFrom, out int sliceEnd)
+    {
+        restoredFrom = -1;
+        sliceEnd = 0;
         if (string.IsNullOrEmpty(text) || maxColumns <= 0)
             return ("", 0, 0, 0);
 
         if (AnsiString.TryMeasurePlainAscii(text, out _))
-            return SliceAsciiWithAnsi(text, startColumn, maxColumns);
+            return SliceAsciiWithAnsi(text, startColumn, maxColumns, restoreClosers, out restoredFrom, out sliceEnd);
 
         // Escape sequences before the first included grapheme are the prefix; the result is empty
         // until that grapheme is reached, so one builder holds prefix and result in order.
@@ -569,6 +589,7 @@ public static class DisplayWidth
         int paddingBefore = 0;
         int paddingAfter = 0;
         bool started = false;
+        bool clippedOnRight = false;
 
         // True while i is known to be a grapheme boundary of the whole text. The original
         // implementation looked every grapheme up by index in an enumeration of the whole text
@@ -644,6 +665,7 @@ public static class DisplayWidth
                     // Wide character doesn't fit - need padding after
                     paddingAfter = maxColumns - columnsUsed;
                 }
+                clippedOnRight = true;
                 break;
             }
 
@@ -654,8 +676,24 @@ public static class DisplayWidth
             i += graphemeLength;
         }
 
-        // The loop only stops at a grapheme, never at an escape sequence, so there are no
-        // trailing sequences to collect.
+        // The loop only stops at a grapheme, never at an escape sequence, so the sequences that
+        // end the text are still ahead when the text was clipped. They close what the slice opened.
+        if (clippedOnRight)
+        {
+            var suffixStart = AnsiString.TrailingEscapeSuffixStart(text);
+
+            // Sequences just before the cut can already be the same ones. With padding after the
+            // slice they are not at its end, so they are restored.
+            if (suffixStart < text.Length
+                && !(started && paddingAfter == 0 && EndsWith(result, text.AsSpan(suffixStart))))
+            {
+                restoredFrom = suffixStart;
+                if (started && restoreClosers)
+                    result.Append(text, suffixStart, text.Length - suffixStart);
+            }
+        }
+
+        sliceEnd = started ? i : 0;
         var slice = started ? result.ToString() : "";
         if (result.Capacity > MaxCachedSliceBuilderCapacity)
             t_sliceBuilder = null;
@@ -672,8 +710,10 @@ public static class DisplayWidth
     /// and a cluster of its own, so no segmentation and no padding are involved.
     /// </summary>
     private static (string text, int columns, int paddingBefore, int paddingAfter) SliceAsciiWithAnsi(
-        string text, int startColumn, int maxColumns)
+        string text, int startColumn, int maxColumns, bool restoreClosers, out int restoredFrom, out int sliceEnd)
     {
+        restoredFrom = -1;
+        sliceEnd = 0;
         char[]? rented = null;
         Span<char> buffer = text.Length <= SliceStackBufferLength
             ? stackalloc char[SliceStackBufferLength]
@@ -683,6 +723,7 @@ public static class DisplayWidth
             var written = 0;
             var currentColumn = 0;
             var columnsUsed = 0;
+            var clippedOnRight = false;
             var i = 0;
             while (i < text.Length)
             {
@@ -707,7 +748,10 @@ public static class DisplayWidth
                 }
 
                 if (columnsUsed == maxColumns)
+                {
+                    clippedOnRight = true;
                     break;
+                }
 
                 buffer[written++] = c;
                 columnsUsed++;
@@ -718,6 +762,26 @@ public static class DisplayWidth
             if (columnsUsed == 0)
                 return ("", 0, 0, 0);
 
+            sliceEnd = i;
+
+            // The sequences that end the text are still ahead when it was clipped. They close what
+            // the slice opened, unless the slice already ends in the same ones. They fit the
+            // buffer: it holds the text, of which the slice and these sequences are disjoint parts.
+            if (clippedOnRight)
+            {
+                var suffixStart = AnsiString.TrailingEscapeSuffixStart(text);
+                var suffix = text.AsSpan(suffixStart);
+                if (!suffix.IsEmpty && !buffer[..written].EndsWith(suffix))
+                {
+                    restoredFrom = suffixStart;
+                    if (restoreClosers)
+                    {
+                        suffix.CopyTo(buffer[written..]);
+                        written += suffix.Length;
+                    }
+                }
+            }
+
             var slice = written == text.Length ? text : new string(buffer[..written]);
             return (slice, columnsUsed, 0, 0);
         }
@@ -726,6 +790,20 @@ public static class DisplayWidth
             if (rented is not null)
                 ArrayPool<char>.Shared.Return(rented);
         }
+    }
+
+    private static bool EndsWith(StringBuilder builder, ReadOnlySpan<char> value)
+    {
+        if (builder.Length < value.Length)
+            return false;
+
+        var offset = builder.Length - value.Length;
+        for (var k = 0; k < value.Length; k++)
+        {
+            if (builder[offset + k] != value[k])
+                return false;
+        }
+        return true;
     }
 
     [ThreadStatic]

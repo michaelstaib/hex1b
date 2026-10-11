@@ -267,10 +267,15 @@ internal static class AnsiString
         return text[index].ToString();
     }
 
-    public static string TrailingEscapeSuffix(string text)
+    /// <summary>
+    /// Returns the index where the run of complete CSI and OSC sequences at the end of the text
+    /// starts, which is typically a reset or a hyperlink closer, or the length of the text when it
+    /// does not end in such a run.
+    /// </summary>
+    internal static int TrailingEscapeSuffixStart(string text)
     {
         if (string.IsNullOrEmpty(text))
-            return "";
+            return 0;
 
         // Find the end index of the last printable character.
         var lastPrintableEnd = 0;
@@ -293,7 +298,7 @@ internal static class AnsiString
         }
 
         if (lastPrintableEnd >= text.Length)
-            return "";
+            return text.Length;
 
         // Ensure suffix contains only full escape sequences (CSI or OSC).
         for (var i = lastPrintableEnd; i < text.Length;)
@@ -308,10 +313,10 @@ internal static class AnsiString
                 i = nextIndex;
                 continue;
             }
-            return "";
+            return text.Length;
         }
 
-        return text.Substring(lastPrintableEnd);
+        return lastPrintableEnd;
     }
 
     private static bool TryReadCsi(string text, int index, out int nextIndex)

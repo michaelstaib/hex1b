@@ -88,9 +88,10 @@ public static class LayoutProviderHelper
 
         var sliceLength = endColumnExclusive - startColumn;
 
-        // Use SliceByDisplayWidth to properly handle wide characters and get padding info
+        // Use SliceByDisplayWidth to properly handle wide characters and get padding info. The
+        // sequences that end the text are restored here, after the padding, and not by the slicer.
         var (slicedText, _, paddingBefore, paddingAfter) =
-            DisplayWidth.SliceByDisplayWidthWithAnsi(text, startColumn, sliceLength);
+            DisplayWidth.SliceByDisplayWidthWithAnsi(text, startColumn, sliceLength, restoreClosers: false, out var restoredFrom, out _);
 
         if (slicedText.Length == 0 && paddingBefore == 0 && paddingAfter == 0)
             return (x, "");
@@ -100,12 +101,8 @@ public static class LayoutProviderHelper
 
         // If we clipped away printable characters on the right, preserve any trailing
         // escape suffix (typically a reset-to-inherited) to avoid style leaking.
-        if (endColumnExclusive < visibleLength)
-        {
-            var suffix = AnsiString.TrailingEscapeSuffix(text);
-            if (!string.IsNullOrEmpty(suffix) && !clippedText.EndsWith(suffix, StringComparison.Ordinal))
-                clippedText += suffix;
-        }
+        if (restoredFrom >= 0)
+            clippedText = string.Concat(clippedText, text.AsSpan(restoredFrom));
 
         var adjustedX = x + startColumn;
         return (adjustedX, clippedText);

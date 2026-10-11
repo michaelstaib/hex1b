@@ -218,6 +218,43 @@ public class LayoutNodeAnsiClippingTests
     }
 
     [TestMethod]
+    public void ClipString_WideCharacterSplitAtRightEdgeAfterResetThatEndsTheSlice_RestoresTheResetAfterThePadding()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 2, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b[31mA\x1b[0m中B\x1b[0m");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("\x1b[31mA\x1b[0m \x1b[0m", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_ResetEndsTheSliceAndTheText_IsNotRepeated()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 3, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b[31mABC\x1b[0mDE\x1b[0m");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("\x1b[31mABC\x1b[0m", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_ClippedOnNonAsciiText_RestoresHyperlinkCloserAndResetOnce()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 4, 1));
+        var closers = "\x1b]8;;\x1b\\\x1b[0m";
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b[31m\x1b]8;;http://example.com\x1b\\中文字" + closers);
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("\x1b[31m\x1b]8;;http://example.com\x1b\\中文" + closers, clipped);
+    }
+
+    [TestMethod]
     public void ClipString_GraphemeHeavyLine_ClipsOnClusterBoundaries()
     {
         var node = new LayoutNode();
