@@ -13,7 +13,7 @@ internal static class AnsiString
     }
 
     /// <summary>
-    /// Measures the display width of the text outside CSI and OSC sequences. Reports through
+    /// Measures the display width of the text outside CSI, OSC, DCS and APC sequences. Reports through
     /// <paramref name="isPlainAscii"/> whether the visible part is nothing but printable ASCII
     /// (0x20-0x7E) with only complete CSI or OSC sequences around it.
     /// </summary>
@@ -36,8 +36,8 @@ internal static class AnsiString
     }
 
     /// <summary>
-    /// Counts the columns of text that consists only of printable ASCII outside complete CSI or
-    /// OSC sequences. Returns false at the first other character, including an escape that does
+    /// Counts the columns of text that consists only of printable ASCII outside complete CSI, OSC,
+    /// DCS or APC sequences. Returns false at the first other character, including an escape that does
     /// not start a complete sequence.
     /// </summary>
     internal static bool TryMeasurePlainAscii(string text, out int width)
@@ -54,7 +54,8 @@ internal static class AnsiString
                 continue;
             }
 
-            if (c == Escape && (TryReadCsi(text, i, out var nextIndex) || TryReadOsc(text, i, out nextIndex)))
+            if (c == Escape && (TryReadCsi(text, i, out var nextIndex) || TryReadOsc(text, i, out nextIndex)
+                || TryReadDcsOrApc(text, i, out nextIndex)))
             {
                 i = nextIndex;
                 continue;
@@ -89,7 +90,7 @@ internal static class AnsiString
     }
 
     /// <summary>
-    /// Copies the text without CSI and OSC sequences into <paramref name="destination"/>, which
+    /// Copies the text without CSI, OSC, DCS and APC sequences into <paramref name="destination"/>, which
     /// must be at least as long as the text, and returns the number of characters written.
     /// </summary>
     private static int StripAnsiCodes(string text, Span<char> destination)
@@ -103,6 +104,11 @@ internal static class AnsiString
                 continue;
             }
             if (TryReadOsc(text, i, out nextIndex))
+            {
+                i = nextIndex;
+                continue;
+            }
+            if (TryReadDcsOrApc(text, i, out nextIndex))
             {
                 i = nextIndex;
                 continue;
@@ -268,9 +274,9 @@ internal static class AnsiString
     }
 
     /// <summary>
-    /// Returns the index where the run of complete CSI and OSC sequences at the end of the text
-    /// starts, which is typically a reset or a hyperlink closer, or the length of the text when it
-    /// does not end in such a run.
+    /// Returns the index where the run of complete CSI, OSC, DCS and APC sequences at the end of the
+    /// text starts, which is typically a reset or a hyperlink closer, or the length of the text when
+    /// it does not end in such a run.
     /// </summary>
     internal static int TrailingEscapeSuffixStart(string text)
     {
@@ -291,6 +297,11 @@ internal static class AnsiString
                 i = nextIndex;
                 continue;
             }
+            if (TryReadDcsOrApc(text, i, out nextIndex))
+            {
+                i = nextIndex;
+                continue;
+            }
 
             // Treat any non-escape as printable for our purposes.
             lastPrintableEnd = i + 1;
@@ -300,7 +311,7 @@ internal static class AnsiString
         if (lastPrintableEnd >= text.Length)
             return text.Length;
 
-        // Ensure suffix contains only full escape sequences (CSI or OSC).
+        // Ensure suffix contains only full escape sequences.
         for (var i = lastPrintableEnd; i < text.Length;)
         {
             if (TryReadCsi(text, i, out var nextIndex))
@@ -309,6 +320,11 @@ internal static class AnsiString
                 continue;
             }
             if (TryReadOsc(text, i, out nextIndex))
+            {
+                i = nextIndex;
+                continue;
+            }
+            if (TryReadDcsOrApc(text, i, out nextIndex))
             {
                 i = nextIndex;
                 continue;
@@ -381,5 +397,28 @@ internal static class AnsiString
 
         // Incomplete OSC sequence.
         return false;
+    }
+
+    /// <summary>
+    /// Tries to read a DCS (Device Control String, ESC P) or APC (Application Program Command,
+    /// ESC _) sequence. Both end with ST, which is ESC \ only; unlike for OSC, BEL does not end them.
+    /// </summary>
+    private static bool TryReadDcsOrApc(string text, int index, out int nextIndex)
+    {
+        nextIndex = index;
+        if (index < 0 || index >= text.Length)
+            return false;
+
+        if (text[index] != Escape)
+            return false;
+        if (index + 1 >= text.Length || (text[index + 1] != 'P' && text[index + 1] != '_'))
+            return false;
+
+        var terminator = text.IndexOf("\x1b\\", index + 2, StringComparison.Ordinal);
+        if (terminator < 0)
+            return false; // Incomplete DCS or APC sequence.
+
+        nextIndex = terminator + 2;
+        return true;
     }
 }

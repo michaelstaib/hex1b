@@ -434,29 +434,74 @@ public class DisplayWidthTests
     }
 
     [TestMethod]
-    public void SliceByDisplayWidthWithAnsi_DcsSequence_IsNotRecognisedAndCountsAsText()
+    public void SliceByDisplayWidthWithAnsi_DcsSequence_IsKeptWithoutCountingColumns()
     {
-        // Pins current behaviour: only CSI and OSC are parsed. DCS (ESC P ... ST) is not skipped:
-        // the ESCs are zero-width graphemes and are kept, while the payload letters count
-        // as 7 visible columns.
+        // DCS is ESC P ... ST with ST being ESC \; the payload is zero width.
         var text = "\x1bPq#0\x1b\\AB";
 
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
 
-        Assert.AreEqual((text, 7, 0, 0), result);
+        Assert.AreEqual((text, 2, 0, 0), result);
     }
 
     [TestMethod]
-    public void SliceByDisplayWidthWithAnsi_ApcSequence_IsNotRecognisedAndCountsAsText()
+    public void SliceByDisplayWidthWithAnsi_ApcSequence_IsKeptWithoutCountingColumns()
     {
-        // Pins current behaviour: only CSI and OSC are parsed. APC (ESC _ ... ST) is not skipped:
-        // the ESCs are zero-width graphemes and are kept, while the payload letters count
-        // as 8 visible columns.
+        // APC is ESC _ ... ST with ST being ESC \; the payload is zero width.
         var text = "\x1b_Gi=1\x1b\\AB";
 
         var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
 
-        Assert.AreEqual((text, 8, 0, 0), result);
+        Assert.AreEqual((text, 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_DcsSequenceBetweenIncludedCharacters_IsKeptInPlace()
+    {
+        var text = "A\x1bPq#0\x1b\\BC";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 2);
+
+        Assert.AreEqual(("A\x1bPq#0\x1b\\B", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_ApcSequenceInsideSkippedRegion_MovesToPrefix()
+    {
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi("AB\x1b_Gi=1\x1b\\CD", 2, 2);
+
+        Assert.AreEqual(("\x1b_Gi=1\x1b\\CD", 2, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_DcsSequenceAroundNonAsciiText_IsKeptWithoutCountingColumns()
+    {
+        var text = "\x1bPq#0\x1b\\中\x1b_Gi=1\x1b\\文";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual((text, 4, 0, 0), result);
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_UnterminatedDcsAndApc_AreConsumedToEndAndKept()
+    {
+        // Like an unterminated CSI or OSC, the rest of the text belongs to the sequence, so a
+        // clip never cuts through it and leaves a bare introducer behind.
+        Assert.AreEqual(("A\x1bPq#0", 1, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("A\x1bPq#0", 0, 80));
+        Assert.AreEqual(("A\x1b_Gi=1", 1, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("A\x1b_Gi=1", 0, 80));
+        Assert.AreEqual(("A\x1bPq#0", 1, 0, 0), DisplayWidth.SliceByDisplayWidthWithAnsi("A\x1bPq#0", 0, 1));
+    }
+
+    [TestMethod]
+    public void SliceByDisplayWidthWithAnsi_DcsTerminatedByBel_IsNotTerminated()
+    {
+        // BEL ends an OSC but not a DCS, so the DCS runs on to the end of the text.
+        var text = "A\x1bPq#0\x07B";
+
+        var result = DisplayWidth.SliceByDisplayWidthWithAnsi(text, 0, 80);
+
+        Assert.AreEqual((text, 1, 0, 0), result);
     }
 
     [TestMethod]

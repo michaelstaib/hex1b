@@ -602,11 +602,12 @@ public static class DisplayWidth
         int i = 0;
         while (i < text.Length)
         {
-            // CSI sequences (ESC [ ... final byte) and OSC sequences (ESC ] ... ST, where ST is
-            // ESC \ or BEL) are kept without counting columns.
-            if (text[i] == '\x1b' && i + 1 < text.Length && (text[i + 1] == '[' || text[i + 1] == ']'))
+            // CSI sequences (ESC [ ... final byte), OSC sequences (ESC ] ... ST, where ST is
+            // ESC \ or BEL) and DCS and APC sequences (ESC P or ESC _ ... ST, where ST is ESC \)
+            // are kept without counting columns.
+            if (text[i] == '\x1b' && i + 1 < text.Length && IsSequenceIntroducer(text[i + 1]))
             {
-                var sequenceEnd = text[i + 1] == '[' ? SkipCsiSequence(text, i) : SkipOscSequence(text, i);
+                var sequenceEnd = SkipEscapeSequence(text, i);
                 result.Append(text, i, sequenceEnd - i);
                 i = sequenceEnd;
                 atBoundary = IsGraphemeBoundaryAfterSequence(text, i);
@@ -733,7 +734,7 @@ public static class DisplayWidth
                     // Escape sequences are kept without counting columns. Before the first
                     // included character they form the prefix, which is the same position in
                     // the output.
-                    var sequenceEnd = text[i + 1] == '[' ? SkipCsiSequence(text, i) : SkipOscSequence(text, i);
+                    var sequenceEnd = SkipEscapeSequence(text, i);
                     text.AsSpan(i, sequenceEnd - i).CopyTo(buffer[written..]);
                     written += sequenceEnd - i;
                     i = sequenceEnd;
@@ -808,6 +809,37 @@ public static class DisplayWidth
 
     [ThreadStatic]
     private static StringBuilder? t_sliceBuilder;
+
+    /// <summary>
+    /// Whether the character after an ESC starts a CSI, OSC, DCS or APC sequence.
+    /// </summary>
+    private static bool IsSequenceIntroducer(char c) => c is '[' or ']' or 'P' or '_';
+
+    /// <summary>
+    /// Returns the index just past the escape sequence that starts at <paramref name="start"/>, or
+    /// the end of the text if it is not terminated. The character after the ESC must satisfy
+    /// <see cref="IsSequenceIntroducer"/>.
+    /// </summary>
+    private static int SkipEscapeSequence(string text, int start)
+    {
+        return text[start + 1] switch
+        {
+            '[' => SkipCsiSequence(text, start),
+            ']' => SkipOscSequence(text, start),
+            _ => SkipDcsOrApcSequence(text, start),
+        };
+    }
+
+    /// <summary>
+    /// Returns the index just past a DCS or APC sequence that starts at <paramref name="start"/>
+    /// (ESC P or ESC _ ... ST, with ST being ESC \ only), or the end of the text if it is not
+    /// terminated.
+    /// </summary>
+    private static int SkipDcsOrApcSequence(string text, int start)
+    {
+        var terminator = text.IndexOf("\x1b\\", start + 2, StringComparison.Ordinal);
+        return terminator < 0 ? text.Length : terminator + 2;
+    }
 
     /// <summary>
     /// Returns the index just past a CSI sequence that starts at <paramref name="start"/>

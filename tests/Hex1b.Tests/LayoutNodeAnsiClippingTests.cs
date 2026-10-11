@@ -270,31 +270,82 @@ public class LayoutNodeAnsiClippingTests
     }
 
     [TestMethod]
-    public void ClipString_DcsSequence_IsNotRecognisedAndClippedAsText()
+    public void ClipString_DcsSequenceInsideClipRegion_ReturnsTextUnchanged()
     {
-        // Pins current behaviour: DCS is not skipped. The ESCs are zero-width graphemes, and the
-        // payload counts as visible text, so it is clipped like text.
         var node = new LayoutNode();
         node.Arrange(new Rect(0, 0, 4, 1));
+        var text = "\x1bPq#0\x1b\\AB";
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, text);
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual(text, clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_DcsSequenceBeforeClippedText_KeepsTheWholeSequence()
+    {
+        // The payload is zero width, so only "A" fits and the ST is never cut off.
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 1, 1));
 
         var (adjustedX, clipped) = node.ClipString(0, 0, "\x1bPq#0\x1b\\AB");
 
         Assert.AreEqual(0, adjustedX);
-        Assert.AreEqual("\x1bPq#0\x1b", clipped);
+        Assert.AreEqual("\x1bPq#0\x1b\\A", clipped);
     }
 
     [TestMethod]
-    public void ClipString_ApcSequence_IsNotRecognisedAndClippedAsText()
+    public void ClipString_ApcSequenceInsideClipRegion_ReturnsTextUnchanged()
     {
-        // Pins current behaviour: APC is not skipped. The ESCs are zero-width graphemes, and the
-        // payload counts as visible text, so it is clipped like text.
         var node = new LayoutNode();
         node.Arrange(new Rect(0, 0, 4, 1));
+        var text = "\x1b_Gi=1\x1b\\AB";
 
-        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b_Gi=1\x1b\\AB");
+        var (adjustedX, clipped) = node.ClipString(0, 0, text);
 
         Assert.AreEqual(0, adjustedX);
-        Assert.AreEqual("\x1b_Gi=", clipped);
+        Assert.AreEqual(text, clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_ApcSequenceBeforeClippedNonAsciiText_KeepsTheWholeSequence()
+    {
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 2, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b_Gi=1\x1b\\中文");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("\x1b_Gi=1\x1b\\中", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_ApcSequenceAfterClippedText_RestoresItWithTheResetBeforeIt()
+    {
+        // The reset and the APC both end the text, so both are restored in order.
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 3, 1));
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, "\x1b[31mABCDE\x1b[0m\x1b_Gi=1\x1b\\");
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual("\x1b[31mABC\x1b[0m\x1b_Gi=1\x1b\\", clipped);
+    }
+
+    [TestMethod]
+    public void ClipString_UnterminatedDcsAfterText_IsKeptWhole()
+    {
+        // An unterminated DCS is consumed to the end of the text like an unterminated CSI or OSC, so
+        // clipping never leaves its introducer behind without the rest.
+        var node = new LayoutNode();
+        node.Arrange(new Rect(0, 0, 3, 1));
+        var text = "AB\x1bPq#0";
+
+        var (adjustedX, clipped) = node.ClipString(0, 0, text);
+
+        Assert.AreEqual(0, adjustedX);
+        Assert.AreEqual(text, clipped);
     }
 
     [TestMethod]
@@ -385,12 +436,33 @@ public class LayoutNodeAnsiClippingTests
     [TestMethod]
     public void VisibleLength_UnterminatedSequencesAndStrayEscape_AreMeasuredAsText()
     {
-        // Pins current behaviour: only complete CSI and OSC sequences are stripped. Anything else,
-        // including the "[31;" after a lone ESC, is measured as text (ESC itself is zero width).
+        // Pins current behaviour: only complete CSI, OSC, DCS and APC sequences are stripped.
+        // Anything else, including the "[31;" after a lone ESC, is measured as text (ESC itself is
+        // zero width).
         Assert.AreEqual(2 + 4, AnsiString.VisibleLength("AB\x1b[31;"));
         Assert.AreEqual(2 + 4, AnsiString.VisibleLength("AB\x1b]8;;"));
+        Assert.AreEqual(2 + 4, AnsiString.VisibleLength("AB\x1bPq#0"));
+        Assert.AreEqual(2 + 5, AnsiString.VisibleLength("AB\x1b_Gi=1"));
         Assert.AreEqual(2, AnsiString.VisibleLength("AB\x1b"));
         Assert.AreEqual(3, AnsiString.VisibleLength("A\x1bXB"));
+    }
+
+    [TestMethod]
+    public void VisibleLength_DcsAndApcSequences_AreZeroWidth()
+    {
+        Assert.AreEqual(2, AnsiString.VisibleLength("\x1bPq#0\x1b\\AB"));
+        Assert.AreEqual(2, AnsiString.VisibleLength("\x1b_Gi=1\x1b\\AB"));
+        Assert.AreEqual(2, AnsiString.VisibleLength("A\x1b_Gi=1;payload\x1b\\B"));
+        Assert.AreEqual(0, AnsiString.VisibleLength("\x1bPq#0\x1b\\"));
+        // A terminator other than ESC \ does not end them.
+        Assert.AreEqual(2 + 4, AnsiString.VisibleLength("AB\x1bPq#0\x07"));
+    }
+
+    [TestMethod]
+    public void VisibleLength_DcsAndApcSequencesAroundNonAsciiText_AreZeroWidth()
+    {
+        Assert.AreEqual(4, AnsiString.VisibleLength("\x1bPq#0\x1b\\中文"));
+        Assert.AreEqual(4, AnsiString.VisibleLength("中\x1b_Gi=1\x1b\\文"));
     }
 
     [TestMethod]
