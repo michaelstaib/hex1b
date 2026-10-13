@@ -1337,9 +1337,11 @@ public sealed partial class Hex1bTerminal : IDisposable, IAsyncDisposable
                     // Channel empty - this is a frame boundary
                     await NotifyWorkloadFiltersFrameCompleteAsync();
 
-                    // Process and playback reads return empty only at EOF (or cancellation).
+                    // Process reads return empty only at EOF (or cancellation). Playback can
+                    // emit empty output events, so it reaches EOF only after its channel drains.
                     // Other workloads can return empty between frames and must keep pumping.
-                    if (_workload is StandardProcessWorkloadAdapter or Hex1bTerminalChildProcess or AsciinemaFileWorkloadAdapter ||
+                    if (_workload is StandardProcessWorkloadAdapter or Hex1bTerminalChildProcess ||
+                        _workload is AsciinemaFileWorkloadAdapter { OutputCompleted: true } ||
                         _workload is Hmp1WorkloadAdapter { OutputCompleted: true })
                         break;
                     
