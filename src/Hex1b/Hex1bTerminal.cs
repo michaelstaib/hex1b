@@ -574,7 +574,7 @@ public sealed partial class Hex1bTerminal : IDisposable, IAsyncDisposable
     /// workload lifecycle.
     /// </para>
     /// <para>
-    /// For process and HMP1 workloads, normal completion
+    /// For process, HMP1, and asciinema file-playback workloads, normal completion
     /// also waits for remaining output to be applied to the terminal and sent to
     /// the presentation adapter. Cancellation can interrupt this drain.
     /// </para>
@@ -676,9 +676,9 @@ public sealed partial class Hex1bTerminal : IDisposable, IAsyncDisposable
     {
         var exitCode = await runTask;
 
-        // Process exit drains stdout/stderr into the adapter's channel, not into
-        // the terminal. Finish applying and presenting those bytes before shutdown.
-        if (_workload is StandardProcessWorkloadAdapter or Hex1bTerminalChildProcess or Hmp1WorkloadAdapter &&
+        // These workloads complete after writing to an adapter channel, not after
+        // the terminal has applied and presented that output. Drain before shutdown.
+        if (_workload is StandardProcessWorkloadAdapter or Hex1bTerminalChildProcess or Hmp1WorkloadAdapter or AsciinemaFileWorkloadAdapter &&
             _outputProcessingTask is not null)
             await _outputProcessingTask.WaitAsync(ct);
 
@@ -1337,9 +1337,11 @@ public sealed partial class Hex1bTerminal : IDisposable, IAsyncDisposable
                     // Channel empty - this is a frame boundary
                     await NotifyWorkloadFiltersFrameCompleteAsync();
 
-                    // Process reads return empty only at EOF (or cancellation).
+                    // Process reads return empty only at EOF (or cancellation). Playback can
+                    // emit empty output events, so it reaches EOF only after its channel drains.
                     // Other workloads can return empty between frames and must keep pumping.
                     if (_workload is StandardProcessWorkloadAdapter or Hex1bTerminalChildProcess ||
+                        _workload is AsciinemaFileWorkloadAdapter { OutputCompleted: true } ||
                         _workload is Hmp1WorkloadAdapter { OutputCompleted: true })
                         break;
                     

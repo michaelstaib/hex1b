@@ -616,16 +616,22 @@ public sealed class Hex1bTerminalBuilder
 
             Func<CancellationToken, Task<int>> runCallback = async ct =>
             {
-                await adapter.StartAsync(ct);
-                
-                // Wait for playback to complete (when Disconnected is fired)
-                var tcs = new TaskCompletionSource<int>();
-                adapter.Disconnected += () => tcs.TrySetResult(0);
-                
-                // Also handle cancellation
-                using var registration = ct.Register(() => tcs.TrySetCanceled(ct));
-                
-                return await tcs.Task;
+                // Subscribe before starting playback so a zero-delay cast cannot finish first.
+                var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+                void OnDisconnected() => tcs.TrySetResult(0);
+                adapter.Disconnected += OnDisconnected;
+                try
+                {
+                    await adapter.StartAsync(ct);
+
+                    // Also handle cancellation
+                    using var registration = ct.Register(() => tcs.TrySetCanceled(ct));
+                    return await tcs.Task;
+                }
+                finally
+                {
+                    adapter.Disconnected -= OnDisconnected;
+                }
             };
 
             return new Hex1bTerminalBuildContext(adapter, runCallback);

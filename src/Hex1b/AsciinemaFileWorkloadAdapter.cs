@@ -84,6 +84,8 @@ public sealed class AsciinemaFileWorkloadAdapter : IHex1bTerminalWorkloadAdapter
     /// </summary>
     public int Height { get; private set; }
 
+    internal bool OutputCompleted => _outputChannel.Reader.Completion.IsCompleted;
+
     /// <summary>
     /// Starts playback of the asciinema file.
     /// </summary>
